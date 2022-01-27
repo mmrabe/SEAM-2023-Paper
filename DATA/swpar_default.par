@@ -49,3 +49,12 @@ sre_brf1	-2.5
 sre_brf2	-0.5
 sre_rg1		-0.0
 sre_rg2		-0.0
+F	0.14
+G	1.0
+ans	0.0
+mas	1.5
+match_penalty	-1.5
+d 0.5
+mu1	50.0
+mu2	0.0
+rfrac 0.2
