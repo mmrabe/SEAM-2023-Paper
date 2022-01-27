@@ -25,6 +25,11 @@
 
 #define SWIFT_VARIANT "base"
 
+#ifndef NOACTR
+#define N_CORPUS_CDUM 2
+#define SWIFT_VARIANT "actr1-lrp"
+#endif
+
 // Numerical recipes includes
 //#include "./NumericalRecipes/nrutil.c"
 #include "logsumexp.c"
@@ -182,6 +187,18 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
     require(params, sre_brf2);
     require(params, sre_rg1);
     require(params, sre_rg2);
+    #ifndef NOACTR
+    require(params, F);
+    require(params, G);
+    require(params, ans);
+    require(params, mas);
+    require(params, d);
+    require(params, match_penalty);
+    require(params, mu1);
+    require(params, mu2);
+    require(params, rfrac);
+    double actr_mu1 = val(params, mu1), actr_mu2 = val(params, mu2), rfrac = val(params, rfrac);
+    #endif
 
     double delta0 = val(params, delta0);   // nondynamical processing span in letter spaces
     double delta1 = val(params, delta1);   // dynamical processing span in letter spaces
@@ -238,6 +255,10 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
     r2[4] = val(params, sre_brf2);         // ... backward refixations
     r2[5] = val(params, sre_rg2);          // ... regressions
     //double sprob = val(params, sprob);
+
+    #ifndef NOACTR
+    actr_params aparams = {1, val(params, F), val(params, G), val(params, ans), val(params, mas), val(params, d), val(params, match_penalty)};
+    #endif
 
 
     // rescale parameters
@@ -470,9 +491,39 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
             loglik_spat = dvector(1, nread);                   /* support variable for fitting */
         }
 
+        int * n_words_by_state = vector(int, NW);
+
+        #ifndef NOACTR
+        int * word_waits_for_retrieval = vector(int, NW);
+        double * word_processing_block_times = vector(double, NW);
+        double * procrate_mod = vector(double, NW);
+        double * retrieval_share = vector(double, NW);
+        double R_count = 0;
+        #endif
 
         // loop over trials
         while (endsw_sentence == 0) {  //for ( r=1; r<=nread; r++ ) {
+
+            //printf("%d %d %d %lu @#%lx\n", ix, s, r, ranlong(seed), (size_t) seed);
+
+            #ifndef NOACTR
+            actr_trial * atrial = actr_new_trial(1);
+            actr_retrieval_result retrieval_result;
+            int current_retrieval_id = 0, current_retrieval_trigger = 0;
+            double current_retrieval_started, current_retrieval_ends;
+            actr_retrieval_item current_retrieval;
+            int last_retrieval_at = 0;
+
+
+            actr_add_memory_for(atrial, sentence_prop(corpus, s, actr_template.memory_item_count), sentence_prop(corpus, s, actr_template.memory_template), 0, 0, 0);
+
+
+            for(i=1;i<=NW;i++) {
+                word_waits_for_retrieval[i] = 0;
+                word_processing_block_times[i] = 0.0;
+            }
+            //double * base_levels = vector(double, NW);
+            #endif
 
             /** DEFAULT BUFFER VECTOR LENGTHS **/
             /** Buffer vectors hold temporary or output values and the required length is unknown beforehand. **/
@@ -480,7 +531,6 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
             /** Changed by Max, Feb 27, 2019 **/
 
             last_fixation = 0;
-
 
             if(is_fitting) {
                 loglik_spat[r] = 0.0; // initialize log-likelihood to 0.0 (P=1.0) for the first fixation
@@ -597,6 +647,22 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
 
 
 
+                #ifndef NOACTR
+
+                    double sum_base_level = 0.0;
+                    
+                    actr_compute_avg_overall_base_level_activation(aparams, last_t, t, atrial->moments, atrial->n_history, &sum_base_level);
+
+                    // ACTR VERBOSE
+                    if(files != NULL && files->factr != NULL && atrial->n_items){
+                        #pragma omp critical(WriteOutputACTR)
+                        fprintf(files->factr, "BA %d\t%d\t%d\t%.4lf\n", s, r, (int) t, exp(-sum_base_level));
+                    }
+                    // END ACTR VERBOSE
+                    
+                #endif
+
+
                 //printf("C\n");
 
 
@@ -618,6 +684,44 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
                 lexrate(aa,as,view,len,aord,alpha,delta0,delta1,asym,pred,proc,ppf,theta,decay,eta,NW,kpos,k,0,procrate,fitting);
 
 
+                #ifndef NOACTR
+                    /*for (i=1; i <= NW; i++) {
+                        //procrate_mod[i] = -actr_mu2*sum_base_level;
+                    }*/
+
+                    if ( atrial->n_items > last_retrieval_at && current_retrieval_id ) {
+                        actr_retrieval_result * result = vector(actr_retrieval_result, atrial->runs);
+                        actr_retrieval_result ** all_results = matrix(actr_retrieval_result, atrial->runs, atrial->n_items);
+                        actr_retrieve(aparams, (int) t, current_retrieval, atrial->items, atrial->n_items, atrial->moments, atrial->n_moments, atrial->history, atrial->n_history, atrial->runs, result, all_results, seed, INFINITY);
+                        // only accept retrieval result for items we haven't looked at so far in the current retrieval
+                        for( i = last_retrieval_at + 1; i <= atrial->n_items ; i++ ) {
+                            if( atrial->items[i].trigger == result[1].memory_trigger ) {
+                                retrieval_result = result[1];
+                                //current_retrieval_ends = t + actr_mu1 + retrieval_result.latency;
+                                //word_processing_block_times[current_retrieval_trigger] = current_retrieval_ends;
+                                break;
+                            }
+                        }
+                        for( i = 1; i <= atrial->n_items; i++ ) {
+                            int memory_trigger = all_results[1][i].memory_trigger;
+                            if(memory_trigger && as[memory_trigger] != STATE_TRIGGERRETRIEVAL && memory_trigger != current_retrieval_trigger) {
+                                retrieval_share[memory_trigger] = all_results[1][i].noisy_activation;
+                                as[memory_trigger] = STATE_TRIGGERRETRIEVAL;
+                                adir[memory_trigger] = 1;
+                                acompletion[memory_trigger] = 1;
+                                //printf("%d/%d: %.2lf %.2lf\n",retrieval_result.memory_trigger,all_results[1][i].memory_trigger,all_results[1][i].noisy_activation,exp(all_results[1][i].noisy_activation));
+                            }
+                        }
+                        //printf_vector(retrieval_share, NW, "%.2lf ");
+                        free_vector(actr_retrieval_result, result);
+                        free_matrix(actr_retrieval_result, all_results);
+                        last_retrieval_at = atrial->n_items;
+                    }
+                #endif
+
+
+
+
 
 
                 /* Gillespie algorithm */
@@ -628,11 +732,58 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
                 kapparate = 1.0/(1.0 + kappa0*exp(-kappa1*sq(dist)));
                 W[3] = r_count[3]*nlab*kapparate;                        /* ... nonlabile stage */
                 W[4] = r_count[4]*sacc;                                 /* ... saccade execution */
+
+
+                for(i=1;i<=N_STATES;i++) n_words_by_state[i] = 0;
+                for(i=1;i<=NW;i++) n_words_by_state[as[i]]++;
+
+                #ifndef NOACTR
+                double * weighted_act = vector(double, NW);
+                for(i=1;i<=NW;i++) weighted_act[i] = as[i] == STATE_POSTRETRIEVAL && !isinf(retrieval_share[i]) ? retrieval_share[i] * actr_mu2 : -INFINITY;
+                double sum_weighted_act = logsumexp(weighted_act, NW); // - log(n_words_by_state[STATE_POSTRETRIEVAL]);
+                #endif
+
+
+
                 for ( i=1; i<=NW; i++ )  {
+
+                    #ifndef NOACTR
+                        if(word_processing_block_times[i] > t) {
+                            W[4+i] = 0.0;
+                            continue;
+                        }
+                    #endif
+
                     W[4+i] = procrate[i] * alpha * acompletion[i];
+
+                    #ifndef NOACTR
+                        if(as[i] == STATE_RETRIEVAL) {
+                            W[4+i] = 0.0;
+                        }
+                        if(as[i] == STATE_WAITFORRETRIEVAL) {
+                            W[4+i] = 0.0;
+                        }
+                        if(as[i] == STATE_TRIGGERRETRIEVAL) {
+                            if(current_retrieval_started + actr_mu1 < t) {
+                                W[4+i] = R_count/(1000.0*val(params, F)*exp(-retrieval_share[i]));
+                            } else {
+                                W[4+i] = 0.0;
+                            }
+                            //printf("%d: %.2lf, %.2lf\n", i, W[4+i], retrieval_share[i]);
+                        }
+                        if(as[i] == STATE_POSTRETRIEVAL) {
+                            W[4+i] = R_count/(1000.0*val(params, F)*exp(-retrieval_result.noisy_activation))*exp(weighted_act[i]-sum_weighted_act);
+                            //W[4+i] = fmax(W[4+i], R_count/(1000.0*val(params, F)*exp(retrieval_share[i]-actr_mu2)));
+                        }
+                    #endif
                 }
-                //printf_vector(as, NW, "%d ");
+
+                #ifndef NOACTR
+                free_vector(double, weighted_act);
+                #endif
+
                 //printf_vector(&W[4], NW, "%lf ");
+                //printf_vector(retrieval_share, NW, "%.2lf ");
 
                 /*#pragma omp critical
                 {
@@ -824,17 +975,89 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
                         as[j] = STATE_POSTLEXICAL;
                         adir[j] = -1;
                         n_count[state] = N_count[state];
+                        #ifndef NOACTR
+                            int already_encoded_in_memory = 0;
+                            for(i=1;i<=atrial->n_items;i++) {
+                                if(atrial->items[i].trigger == j) {
+                                    already_encoded_in_memory = 1;
+                                    break;
+                                }
+                            }
+                            if(!already_encoded_in_memory) {
+                                actr_add_memory_for(atrial, sentence_prop(corpus, s, actr_template.memory_item_count), sentence_prop(corpus, s, actr_template.memory_template), j, t, 1);
+                                if(files != NULL && files->factr != NULL) {
+                                    #pragma omp critical(WriteOutputACTR)
+                                    fprintf(files->factr, "EN %d\t%d\t%d\t%d\n", s, r, (int) t, j);
+                                }
+                            }
+                        #endif
+                        #ifndef NOACTR
+                            actr_prepare_retrievals_for(atrial, sentence_prop(corpus, s, actr_template.retrieval_item_count), sentence_prop(corpus, s, actr_template.retrieval_template), j, t);
+                            word_waits_for_retrieval[j] = 0;
+                            for(i=atrial->n_retrievals_complete+1;i<=atrial->n_retrievals;i++) {
+                                if(j == atrial->retrievals[i].trigger) word_waits_for_retrieval[j]++;
+                            }
+                            if(word_waits_for_retrieval[j]) {
+                                as[j] = STATE_WAITFORRETRIEVAL;
+                            }
+                        #endif
                     }
                     
 
 
                     /* processing completed: lexical activation back to zero */
-                    if ( as[j]==STATE_POSTLEXICAL && n_count[state]<=0 )  {
+                    if ( as[j] == STATE_POSTLEXICAL && n_count[state]<=0 )  {
                         as[j] = STATE_COMPLETE;
                         acompletion[j] = 0;
                         n_count[state] = 0;
                         // proc_order[2][++orders[2]] = j;
                     }
+
+
+
+
+                    #ifndef NOACTR
+
+                    if( as[j] == STATE_POSTRETRIEVAL && n_count[state] <= 0) {
+                        as[j] = STATE_COMPLETE;
+                        acompletion[j] = 0;
+                        n_count[state] = 0;
+                    }
+
+                    if( as[j] == STATE_TRIGGERRETRIEVAL && n_count[state] >= R_count) {
+                        for(i=1;i<=NW;i++) {
+                            /*if(i == retrieval_result.memory_trigger) {
+                                word_processing_block_times[i] = current_retrieval_ends + (current_retrieval_ends - current_retrieval_started) * actr_mu2;
+                            }*/
+                            if(as[i] == STATE_RETRIEVAL) {
+                                as[i] = STATE_POSTLEXICAL;
+                                adir[i] = -1;
+                                acompletion[i] = 1;
+                                word_processing_block_times[i] = t + actr_mu1;
+                            } else if(as[i] == STATE_TRIGGERRETRIEVAL) {
+                                as[i] = STATE_POSTRETRIEVAL;
+                                adir[i] = -1;
+                                acompletion[i] = 1;
+                            }
+                        }
+                        // TODO: End with actual j here, not with retrieval_result!
+                        retrieval_result.memory_trigger = j;
+                        retrieval_result.latency = t - current_retrieval_started;
+                        actr_end_retrieval(atrial, retrieval_result);
+                        if(files != NULL && files->factr != NULL) {
+                            #pragma omp critical(WriteOutputACTR)
+                            fprintf(files->factr, "RE %d\t%d\t%d\t%d\t%d\t%d\n", s, r, (int) t, current_retrieval_trigger, word_waits_for_retrieval[current_retrieval_trigger], retrieval_result.memory_trigger);
+                        }
+                        atrial->n_retrievals_complete++;
+                        current_retrieval_id = 0;
+                        current_retrieval_trigger = 0;
+                        current_retrieval_ends = t;
+                        last_retrieval_at = 0;
+                        //printf("Reset word %d with activation %.3lf\n", retrieved_word, retrieval_share[retrieved_word]);
+                    }
+
+                    #endif
+
 
                     if ( as[j] == STATE_LEXICAL )  adir[j] = 1;
 
@@ -842,6 +1065,42 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
                     aa[j] = ((double) n_count[state])/aord;
 
                 }
+
+                #ifndef NOACTR
+
+
+                if(atrial->n_retrievals_complete < atrial->n_retrievals && !current_retrieval_id) {
+                    current_retrieval_id = atrial->n_retrievals_complete + 1;
+                    current_retrieval = atrial->retrievals[current_retrieval_id];
+                    current_retrieval_trigger = current_retrieval.trigger;
+                    if(as[current_retrieval_trigger] == STATE_WAITFORRETRIEVAL) {
+                        word_processing_block_times[current_retrieval_trigger] = INFINITY;
+                        R_count = fmax(1.0, N_count[4+current_retrieval_trigger] * rfrac);
+                        as[current_retrieval_trigger] = STATE_RETRIEVAL;
+                        if(files != NULL && files->factr != NULL) {
+                            #pragma omp critical(WriteOutputACTR)
+                            fprintf(files->factr, "RS %d\t%d\t%d\t%d\t%d\n", s, r, (int) (t + actr_mu1), current_retrieval_trigger, word_waits_for_retrieval[current_retrieval_trigger]);
+                        }
+                        for(i=1;i<=NW;i++) {
+                            retrieval_share[i] = -INFINITY;
+                        }
+                    }
+                    last_retrieval_at = 0;
+                    current_retrieval_started = t;
+                    current_retrieval_ends = INFINITY;
+                    //word_processing_block_times[current_retrieval_trigger] = INFINITY;
+                }
+
+
+
+                /*
+                fprintf_vector(stderr, &n_count[5], NW, "%d ");
+                fprintf_vector(stderr, as, NW, "%d ");
+                usleep(0.1);
+                */
+
+                #endif
+
 
                 /* save activation field history */
                 n_hist++;
@@ -886,10 +1145,17 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
                     }
 
 
+
                     // abort reading if all words have been processed
-                    for ( i=1, last_fixation=1; i<=NW; i++ ) if ( as[i]!=STATE_COMPLETE ) {
-                        last_fixation = 0;
-                        break;
+                    for ( i=1, last_fixation=1; i<=NW; i++ ) {
+                        #ifndef NOACTR
+                        if ( as[i] != STATE_COMPLETE && as[i]!=STATE_POSTRETRIEVAL ) {
+                        #else
+                        if ( as[i] != STATE_COMPLETE ) {
+                        #endif
+                            last_fixation = 0;
+                            break;
+                        }
                     }
 
                 }
@@ -1164,8 +1430,22 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
                 endsw_sentence = r > nread;
             }
 
+
+
+            #ifndef NOACTR
+            actr_free_trial(atrial);
+            //free_vector(double, base_levels);
+            #endif
+
         }
 
+        #ifndef NOACTR
+        free_vector(double, retrieval_share);
+        free_vector(int, word_waits_for_retrieval);
+        free_vector(double, procrate_mod);
+        #endif
+
+        free_vector(int, n_words_by_state);
         free_dvector(t_hist,1,max_t_hist_len);
         free_dmatrix(a_hist,1,max_a_hist_len,1,NW);
         free_imatrix(c_hist,1,max_c_hist_len,1,NW+4);
