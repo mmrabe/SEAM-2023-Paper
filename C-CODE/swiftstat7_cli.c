@@ -166,7 +166,7 @@ int parse_range_literal(char * str, int * target) {
 			if(target != NULL) for(i = 0; i <= to_item-from_item+1; i++) {
 				// add each number within the range to the output array, item by item
 				// this only happens if target != NULL, thereby allowing dry runs which only count the number of items to be added
-				target[n+i] = from_item+i;
+				target[n+i+1] = from_item+i;
 			}
 			n += to_item-from_item+1; // add number of items to total number of items added
 			from_item = -1; // reset lower range bound
@@ -391,9 +391,8 @@ int main(int argc, char **argv) {
 				if(n < 1) {
 					stop(1, "Invalid sentence number range literal “%s”. See error messages for details.", optarg);
 				}
-				items = malloc(sizeof(int) * (n+1));
+				items = vector(int, n+1);
 				parse_range_literal(optarg, items);
-				items[n] = 0;
 				break;
 			case 'P':
 				{
@@ -615,11 +614,11 @@ int main(int argc, char **argv) {
 		// Update model parameters
 		int has_updated_parameters = 0;
 		for(i=0;swift_parameters_meta[i].name!=NULL;i++) {
-			if(swift_parameters_meta[i].type == PARTYPE_INTEGER && hasvalbyid(updates, i, swift_parameter_int)) {
-				setvalbyid(model->params, i, swift_parameter_int, valbyid(updates, i, swift_parameter_int));
+			if(swift_parameters_meta[i].type == PARTYPE_INTEGER && hasvalbyid(updates, i)) {
+				setvalbyid(model->params, i, int, valbyid(updates, i, int));
 				has_updated_parameters = 1;
-			} else if(swift_parameters_meta[i].type == PARTYPE_DOUBLE && hasvalbyid(updates, i, swift_parameter_dbl)) {
-				setvalbyid(model->params, i, swift_parameter_dbl, valbyid(updates, i, swift_parameter_dbl));
+			} else if(swift_parameters_meta[i].type == PARTYPE_DOUBLE && hasvalbyid(updates, i)) {
+				setvalbyid(model->params, i, double, valbyid(updates, i, double));
 				has_updated_parameters = 1;
 			}
 		}
@@ -677,7 +676,7 @@ int main(int argc, char **argv) {
 
 
 			if(items!=NULL) {
-				for(i=0;i<n;i++) {
+				for(i=1;i<=n;i++) {
 					if(items[i]<=0||items[i]>ntrials(cdata)) {
 						stop(2, "You requested trial %d but the sequence file only contains %d trial(s).", items[i], ntrials(cdata));
 					}
@@ -686,7 +685,7 @@ int main(int argc, char **argv) {
 
 			double retvals[N_LOGLIKS]; // if no outputfile specified, get them here
 
-			swift_eval(model, cdata, items, retvals, num_threads, verbose);
+			swift_eval(model, cdata, items, n, retvals, num_threads, verbose);
 			free_swift_dataset(cdata);
 
 			for(i=0;i<N_LOGLIKS;i++) {
@@ -706,7 +705,7 @@ int main(int argc, char **argv) {
 				outpath = "../SIM";
 
 			if(items!=NULL) 
-				for(i=0;i<n;i++) {
+				for(i=1;i<=n;i++) {
 					if(items[i]<=0||items[i]>nsentences(model->corpus)) {
 						stop(2, "The sentence/item requested (%d) was not found in corpus %s! Valid values for this corpus are 1..%d.", items[i], corpus_id, nsentences(model->corpus));
 					}
@@ -736,7 +735,7 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	if(items != NULL) free(items);
+	if(items != NULL) free_vector(int, items);
 
 
 	warn("There was nothing to do.");

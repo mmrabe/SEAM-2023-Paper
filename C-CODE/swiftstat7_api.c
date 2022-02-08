@@ -213,11 +213,11 @@ typedef struct {
 
 
 // Macros for retrieving and updating parameters
-#define valbyid(pars, parid, type) (((type*) swift_param_addr(pars, parid))->val)
-#define hasvalbyid(pars, parid, type) (((type*) swift_param_addr(pars, parid))->hasval)
-#define setvalbyid(pars, parid, type, val) {valbyid(pars, parid, type) = val; hasvalbyid(pars, parid, type) = 1;}
-#define val(pars, par) (pars->par.val)
-#define hasval(pars, par) (pars->par.hasval)
+#define valbyid(pars, parid, type) (*((type*) swift_param_addr(pars, parid, 1)))
+#define hasvalbyid(pars, parid) (*((int*) swift_param_addr(pars, parid, 2)))
+#define setvalbyid(pars, parid, type, val) {valbyid(pars, parid, type) = val; hasvalbyid(pars, parid) = 1;}
+#define val(pars, par) (pars->par)
+#define hasval(pars, par) (pars->_.par)
 #define setval(pars, par, value) {val(pars, par) = value; hasval(pars, par) = 1;}
 
 
@@ -239,19 +239,19 @@ swift_parameters* alloc_parameters(swift_parameters* default_params) {
         swift_parameter_id id = swift_parameters_meta[i].id;
         switch(swift_parameters_meta[i].type) {
             case PARTYPE_INTEGER:
-                if(default_params != NULL && hasvalbyid(default_params, id, swift_parameter_int)) {
-                    setvalbyid(ret, id, swift_parameter_int, valbyid(default_params, id, swift_parameter_int));
+                if(default_params != NULL && hasvalbyid(default_params, id)) {
+                    setvalbyid(ret, id, int, valbyid(default_params, id, int));
                 } else {
-                    valbyid(ret, id, swift_parameter_int) = 0;
-                    hasvalbyid(ret, id, swift_parameter_int) = 0;
+                    valbyid(ret, id, int) = 0;
+                    hasvalbyid(ret, id) = 0;
                 }
                 break;
             case PARTYPE_DOUBLE:
-                if(default_params != NULL && hasvalbyid(default_params, id, swift_parameter_dbl)) {
-                    setvalbyid(ret, id, swift_parameter_dbl, valbyid(default_params, id, swift_parameter_dbl));
+                if(default_params != NULL && hasvalbyid(default_params, id)) {
+                    setvalbyid(ret, id, double, valbyid(default_params, id, double));
                 } else {
-                    valbyid(ret, id, swift_parameter_dbl) = 0.0;
-                    hasvalbyid(ret, id, swift_parameter_dbl) = 0;
+                    valbyid(ret, id, double) = 0.0;
+                    hasvalbyid(ret, id) = 0;
                 }
                 break;
             default:
@@ -285,14 +285,14 @@ int scan_parameter(char *f, swift_parameters *pars, swift_parameter_id id) {
             error(1, "Cannot read integer value for “%s” from parfile!", par.name);
             return 0;
         }
-        setvalbyid(pars, id, swift_parameter_int, tmp);
+        setvalbyid(pars, id, int, tmp);
     } else if(par.type == PARTYPE_DOUBLE) {
         double tmp;
         if(sscanf(f, "%lf%c", &tmp, &dummy) != 1) {
             error(1, "Cannot read double value for “%s” from parfile!", par.name);
             return 0;
         }
-        setvalbyid(pars, id, swift_parameter_dbl, tmp);
+        setvalbyid(pars, id, double, tmp);
     } else {
         warn("Parameter “%s” is known but there is no rule for reading. It is therefore skipped.", par.name);
     }
@@ -332,10 +332,10 @@ void write_parameters(FILE *f, swift_parameters *pars) {
         // iterate through all parameters
         // params without a value or unknown type are skipped and not written into the file!
         swift_parameter_meta par = swift_parameters_meta[i];
-        if(par.type == PARTYPE_INTEGER && hasvalbyid(pars, par.id, swift_parameter_int)) {
-            fprintf(f, "%s\t%d\n", par.name, valbyid(pars, par.id, swift_parameter_int));
-        }else if(par.type == PARTYPE_DOUBLE && hasvalbyid(pars, par.id, swift_parameter_dbl)) {
-            fprintf(f, "%s\t%lf\n", par.name, valbyid(pars, par.id, swift_parameter_dbl));
+        if(par.type == PARTYPE_INTEGER && hasvalbyid(pars, par.id)) {
+            fprintf(f, "%s\t%d\n", par.name, valbyid(pars, par.id, int));
+        }else if(par.type == PARTYPE_DOUBLE && hasvalbyid(pars, par.id)) {
+            fprintf(f, "%s\t%lf\n", par.name, valbyid(pars, par.id, double));
         }
     }
 }
@@ -347,10 +347,10 @@ void print_all_parameters(FILE *f, swift_parameters *pars) {
         // all parameters are printed, including those without a value or unknown type (printed as NA)
         swift_parameter_meta par = swift_parameters_meta[i];
         fprintf(f, "%-10s = ", par.name);
-        if(par.type == PARTYPE_INTEGER && hasvalbyid(pars, par.id, swift_parameter_int)) {
-            fprintf(f, "%d", valbyid(pars, par.id, swift_parameter_int));
-        }else if(par.type == PARTYPE_DOUBLE && hasvalbyid(pars, par.id, swift_parameter_dbl)) {
-            fprintf(f, "%g", valbyid(pars, par.id, swift_parameter_dbl));
+        if(par.type == PARTYPE_INTEGER && hasvalbyid(pars, par.id)) {
+            fprintf(f, "%d", valbyid(pars, par.id, int));
+        }else if(par.type == PARTYPE_DOUBLE && hasvalbyid(pars, par.id)) {
+            fprintf(f, "%g", valbyid(pars, par.id, double));
         }else {
             fprintf(f, "NA");
         }
@@ -364,21 +364,16 @@ void print_parameters(FILE *f, swift_parameters *pars) {
         // iterate through all parameters
         // all parameters are printed, including those without a value or unknown type (printed as NA)
         swift_parameter_meta par = swift_parameters_meta[i];
-        if(par.type == PARTYPE_INTEGER && hasvalbyid(pars, par.id, swift_parameter_int)) {
-            fprintf(f, "%-10s = %d\n", par.name, valbyid(pars, par.id, swift_parameter_int));
-        }else if(par.type == PARTYPE_DOUBLE && hasvalbyid(pars, par.id, swift_parameter_dbl)) {
-            fprintf(f, "%-10s = %g\n", par.name, valbyid(pars, par.id, swift_parameter_dbl));
+        if(par.type == PARTYPE_INTEGER && hasvalbyid(pars, par.id)) {
+            fprintf(f, "%-10s = %d\n", par.name, valbyid(pars, par.id, int));
+        }else if(par.type == PARTYPE_DOUBLE && hasvalbyid(pars, par.id)) {
+            fprintf(f, "%-10s = %g\n", par.name, valbyid(pars, par.id, double));
         }
     }
 }
 
 unsigned int is_param_set(swift_parameters *pars, swift_parameter_meta par) {
-    if(par.type == PARTYPE_INTEGER) {
-        return hasvalbyid(pars, par.id, swift_parameter_int);
-    }else if(par.type == PARTYPE_DOUBLE) {
-        return hasvalbyid(pars, par.id, swift_parameter_dbl);
-    }
-    return 0;
+    return hasvalbyid(pars, par.id);
 }
 
 unsigned int is_param_set_by_id(swift_parameters *pars, swift_parameter_id id) {
@@ -839,6 +834,11 @@ void clear_trial(swift_trial obj) {
     free_vector(swift_fixation, obj.fixations);
 }
 
+void free_trial(swift_trial * obj) {
+    clear_trial(*obj);
+    free(obj);
+}
+
 int load_dataset(FILE *f, char *name, swift_dataset* ret) {
     int ntrials = 0, i, k, tmp;
     long fpos = ftell(f);
@@ -1068,30 +1068,33 @@ int swift_load_data_std(char *inputPath, char *seqName, swift_dataset **dat, int
 }
 
 
+#include "integral.c"
+
+
 // CONVENIENCE CALLERS
 
-void swift_single_eval(swift_model *m, swift_dataset* d, int * trials, double *logliks, unsigned int threads, int verbose) {
-    gaengine(m->params, m->corpus, d, &m->seed, logliks, 1, threads, trials, verbose, NULL);
-}
-
-void swift_single_eval_all(swift_model *m, swift_dataset* d, double *logliks, unsigned int threads, int verbose) {
-    swift_single_eval(m, d, NULL, logliks, threads, verbose);
-}
-
-void swift_eval(swift_model *m, swift_dataset* d, int * trials, double *logliks, unsigned int threads, int verbose) {
-    gaengine(m->params, m->corpus, d, &m->seed, logliks, 0, threads, trials, verbose, NULL);
+void swift_eval(swift_model *m, swift_dataset* d, int * trials, int n_trials, double *logliks, unsigned int threads, int verbose) {
+    //gaengine(m->params, m->corpus, d, &m->seed, logliks, 0, threads, trials, verbose, NULL);
+    swift_likelihood ll;
+    loglik_swift(m, d, trials, n_trials, &ll);
+    logliks[0] = ll.spatial + ll.temporal;
+    logliks[1] = ll.temporal;
+    logliks[2] = ll.spatial;
 }
 
 void swift_eval_all(swift_model *m, swift_dataset* d, double *logliks, unsigned int threads, int verbose) {
-    swift_eval(m, d, NULL, logliks, threads, verbose);
+    swift_eval(m, d, NULL, 0, logliks, threads, verbose);
 }
 
 void swift_eval_single(swift_model *m, swift_dataset* d, int trial, double *logliks, unsigned int threads, int verbose) {
-    int trials[] = {trial, 0};
-    swift_eval(m, d, trials, logliks, threads, verbose);
+    int trials[] = {0, trial};
+    swift_eval(m, d, trials, 1, logliks, threads, verbose);
 }
 
 void swift_generate(swift_model* m, char* output_dir, char* seqname, int * items, unsigned int threads, int make_fixseqin, int verbose) {
+
+    items += 1;
+
     struct swift_files files;
     char file_fsim[PATH_MAX], file_fseq[PATH_MAX], file_proc1[PATH_MAX], file_proc2[PATH_MAX];
     sprintf(file_fsim, "%s/seq_%s.dat", output_dir, seqname);

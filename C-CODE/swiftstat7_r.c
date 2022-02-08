@@ -181,16 +181,16 @@ SEXP swiftr_update(SEXP arg1, SEXP arg2, SEXP arg3) {
   if(swift_parameters_meta[param_id].type == PARTYPE_INTEGER) {
     int param_value = INTEGER(AS_INTEGER(arg3))[0];
     if(param_value == NA_INTEGER) {
-      hasvalbyid(m->params, param_id, swift_parameter_int) = 0;
+      hasvalbyid(m->params, param_id) = 0;
     } else {
-      setvalbyid(m->params, param_id, swift_parameter_int, param_value);
+      setvalbyid(m->params, param_id, int, param_value);
     }
   } else if(swift_parameters_meta[param_id].type == PARTYPE_DOUBLE) {
     double param_value = REAL(AS_NUMERIC(arg3))[0];
     if(param_value == NA_REAL) {
-      hasvalbyid(m->params, param_id, swift_parameter_dbl) = 0;
+      hasvalbyid(m->params, param_id) = 0;
     } else {
-      setvalbyid(m->params, param_id, swift_parameter_dbl, param_value);
+      setvalbyid(m->params, param_id, double, param_value);
     }
   } else {
     Rf_error("Can’t update “%s”. Parameters of this type haven’t been implemented in this library yet.", param_name);
@@ -292,11 +292,11 @@ SEXP swiftr_getparam(SEXP arg1, SEXP arg2) {
   SEXP result;
   if(swift_parameters_meta[param_id].type == PARTYPE_INTEGER) {
     PROTECT(result = NEW_INTEGER(1));
-    INTEGER(result)[0] = hasvalbyid(m->params, param_id, swift_parameter_int) ? valbyid(m->params, param_id, swift_parameter_int) : NA_INTEGER;
+    INTEGER(result)[0] = hasvalbyid(m->params, param_id) ? valbyid(m->params, param_id, int) : NA_INTEGER;
     UNPROTECT(1);
   } else if(swift_parameters_meta[param_id].type == PARTYPE_DOUBLE) {
     PROTECT(result = NEW_NUMERIC(1));
-    REAL(result)[0] = hasvalbyid(m->params, param_id, swift_parameter_dbl) ? valbyid(m->params, param_id, swift_parameter_dbl) : NA_REAL;
+    REAL(result)[0] = hasvalbyid(m->params, param_id) ? valbyid(m->params, param_id, double) : NA_REAL;
     UNPROTECT(1);
   } else {
     Rf_error("Can’t get “%s”. Parameters of this type haven’t been implemented in this library yet.", param_name);
