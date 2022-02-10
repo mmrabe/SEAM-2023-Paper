@@ -39,7 +39,7 @@ void check_array_memory();
 
 
 #define copy_array(type, src, dest, ndim, ...) sw_array_copy(sizeof(type), src, dest, ndim, __VA_ARGS__)
-#define duplicate_array(type, src, ndim, ...) copy_array(type, src, array(type, ndim, __VA_ARGS__), ndim, __VA_ARGS__)
+#define duplicate_array(type, src, ndim, ...) (src == NULL ? NULL : copy_array(type, src, array(type, ndim, __VA_ARGS__), ndim, __VA_ARGS__))
 
 // Some special cases for matrices
 
@@ -238,6 +238,9 @@ void* sw_array(size_t esize, int ndim, ...) {
 }
 
 static void* ar_sw_array_copy(size_t esize, void * src, void * dest, int ndim, int dims[]) {
+
+	if(src == NULL || dest == NULL) return dest;
+
 	int i,j,k;
 	size_t cum_n[ndim], n = 1;
 
