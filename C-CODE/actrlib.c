@@ -789,7 +789,11 @@ void actr_retrieve(actr_params params, int moment, actr_retrieval_item cues, act
 		}
 		strength[j] = params.mas - log(fan);
 		if(0 && isinf(strength[j])) {
-			printf("Fan: %lf %lf\n", fan, log(fan));
+			printf("Fan %d: %lf %lf\n", j, fan, log(fan));
+			for(i=1;i<=n_items;i++) {
+				printf("%d %d %d>%d, ", match[i][j], exists[i][j], items[i].creation, moment);
+			}
+			printf("\n");
 		}
 	}
 
@@ -1063,17 +1067,12 @@ void actr_free_trial_(actr_trial * trial) {
 
 actr_trial * actr_duplicate_trial(actr_trial * src) {
 	actr_trial * ret = actr_new_trial(src->runs);
-	memcpy(ret, src, sizeof(actr_trial));
-	ret->items = vector(actr_memory_item, ret->n_items);
-	copy_vector(actr_memory_item, src->items, ret->items, ret->n_items);
-	ret->retrievals = vector(actr_retrieval_item, ret->n_retrievals);
-	copy_vector(actr_retrieval_item, src->retrievals, ret->retrievals, ret->n_retrievals);
-	ret->retrieval_results = matrix(actr_retrieval_result, ret->runs, ret->n_retrieval_results);
-	copy_matrix(actr_retrieval_result, src->retrieval_results, ret->retrieval_results, ret->runs, ret->n_retrieval_results);
-	ret->history = matrix(int, ret->runs, ret->n_history);
-	copy_matrix(int, src->history, ret->history, ret->runs, ret->n_history);
-	ret->moments = vector(int, ret->n_moments);
-	copy_vector(int, src->moments, ret->moments, ret->n_moments);
+	*ret = *src;
+	ret->items = duplicate_vector(actr_memory_item, src->items, ret->n_items);
+	ret->retrievals = duplicate_vector(actr_retrieval_item, src->retrievals, ret->n_retrievals);
+	ret->retrieval_results = duplicate_matrix(actr_retrieval_result, src->retrieval_results, ret->runs, ret->n_retrieval_results);
+	ret->history = duplicate_matrix(int, src->history, ret->runs, ret->n_history);
+	ret->moments = duplicate_vector(int, src->moments, ret->n_moments);
 	return ret;
 }
 

@@ -4,6 +4,11 @@
 
 #include "cgammalike.c"
 
+actr_params get_actr_params(swift_parameters * params) {
+	actr_params aparams = {1, val(params, F), val(params, G), val(params, ans), val(params, mas), val(params, d), val(params, match_penalty)};
+	return aparams;
+}
+
 typedef struct {
 	double ** hist;
 	int ar_size;
@@ -35,7 +40,23 @@ typedef struct {
 	int is_mislocated, is_refixation;
 	int canc;
 	double dt;
+	struct {
+        int * word_waits_for_retrieval;
+        double * word_processing_block_times;
+        double * retrieval_share;
+        double R_count;
+        actr_trial * atrial;
+        actr_retrieval_result retrieval_result;
+        int current_retrieval_id;
+        int current_retrieval_trigger;
+        double current_retrieval_started;
+        double current_retrieval_ends;
+        actr_retrieval_item current_retrieval;
+        int last_retrieval_at;
+	} actr;
 } swift_run;
+
+
 
 typedef struct {
 	double fixation_location, fixation_duration, saccade_duration;
@@ -138,6 +159,20 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
     }
 	ret->corpus = model->corpus;
 	ret->params = model->params;
+
+
+	ret->actr.word_waits_for_retrieval = vector(int, N);
+	ret->actr.word_processing_block_times = vector(double, N);
+	ret->actr.retrieval_share = vector(double, N);
+	ret->actr.R_count = 0;
+	ret->actr.atrial = actr_new_trial(1);
+	ret->actr.current_retrieval_id = 0;
+	ret->actr.current_retrieval_trigger = 0;
+	ret->actr.last_retrieval_at = 0;
+	ret->s = s;
+
+	actr_add_memory_for(ret->actr.atrial, sentence_prop(ret->corpus, s, actr_template.memory_item_count), sentence_prop(ret->corpus, s, actr_template.memory_template), 0, 0, 0);
+
 	return ret;
 }
 
@@ -171,6 +206,19 @@ swift_run * clone_swift_trial(swift_run * src, unsigned int seed) {
 
 	initSeed(seed ? seed : ranint(&src->seed), &ret->seed);
 
+	ret->actr.word_waits_for_retrieval = duplicate_vector(int, src->actr.word_waits_for_retrieval, src->N);
+	ret->actr.word_processing_block_times = duplicate_vector(double, src->actr.word_processing_block_times, src->N);
+	ret->actr.retrieval_share = duplicate_vector(double, src->actr.retrieval_share, src->N);
+	ret->actr.R_count = src->actr.R_count;
+	ret->actr.atrial = actr_duplicate_trial(src->actr.atrial);
+	ret->actr.retrieval_result = src->actr.retrieval_result;
+	ret->actr.current_retrieval_id = src->actr.current_retrieval_id;
+	ret->actr.current_retrieval_trigger = src->actr.current_retrieval_trigger;
+	ret->actr.current_retrieval_started = src->actr.current_retrieval_started;
+	ret->actr.current_retrieval_ends = src->actr.current_retrieval_ends;
+	ret->actr.current_retrieval = src->actr.current_retrieval;
+	ret->actr.last_retrieval_at = src->actr.last_retrieval_at;
+
 	return ret;
 }
 
@@ -186,6 +234,10 @@ void free_swift_trial(swift_run * trial) {
 	free_vector(double, trial->border);
 	free_vector(int, trial->len);
 	free_vector(double, trial->ptar);
+	free_vector(int, trial->actr.word_waits_for_retrieval);
+	free_vector(double, trial->actr.word_processing_block_times);
+	free_vector(double, trial->actr.retrieval_share);
+	actr_free_trial(trial->actr.atrial);
 	free(trial);
 }
 
@@ -276,12 +328,61 @@ void transition_rates(swift_run * trial) {
 	trial->W[3] *= trial->states[3]; 
 	trial->W[4] *= trial->states[4]; 
 
+	// Update ACT-R retrieval latencies
+    if ( trial->actr.atrial->n_items > trial->actr.last_retrieval_at && trial->actr.current_retrieval_id ) {
+        actr_retrieval_result * result = vector(actr_retrieval_result, trial->actr.atrial->runs);
+        actr_retrieval_result ** all_results = matrix(actr_retrieval_result, trial->actr.atrial->runs, trial->actr.atrial->n_items);
+        actr_retrieve(get_actr_params(trial->params), INFINITY, trial->actr.current_retrieval, trial->actr.atrial->items, trial->actr.atrial->n_items, trial->actr.atrial->moments, trial->actr.atrial->n_moments, trial->actr.atrial->history, trial->actr.atrial->n_history, trial->actr.atrial->runs, result, all_results, &trial->seed, INFINITY);
+        // only accept retrieval result for items we haven't looked at so far in the current retrieval
+        for( i = trial->actr.last_retrieval_at + 1; i <= trial->actr.atrial->n_items ; i++ ) {
+            if( trial->actr.atrial->items[i].trigger == result[1].memory_trigger ) {
+                trial->actr.retrieval_result = result[1];
+                //current_retrieval_ends = t + actr_mu1 + retrieval_result.latency;
+                //word_processing_block_times[current_retrieval_trigger] = current_retrieval_ends;
+                break;
+            }
+        }
+        for( i = 1; i <= trial->actr.atrial->n_items; i++ ) {
+            int memory_trigger = all_results[1][i].memory_trigger;
+            if(memory_trigger && trial->states[4+memory_trigger] != STATE_TRIGGERRETRIEVAL && memory_trigger != trial->actr.current_retrieval_trigger) {
+                trial->actr.retrieval_share[memory_trigger] = all_results[1][i].noisy_activation;
+                trial->states[4+memory_trigger] = STATE_TRIGGERRETRIEVAL;
+            }
+        }
+        //printf_vector(retrieval_share, NW, "%.2lf ");
+        free_vector(actr_retrieval_result, result);
+        free_matrix(actr_retrieval_result, all_results);
+        trial->actr.last_retrieval_at = trial->actr.atrial->n_items;
+    }
+
+    double * weighted_act = vector(double, trial->N);
+    for(i=1; i<=trial->N; i++) weighted_act[i] = trial->states[4+i] == STATE_POSTRETRIEVAL && !isinf(trial->actr.retrieval_share[i]) ? trial->actr.retrieval_share[i] * trial->params->mu2 : -INFINITY;
+    double sum_weighted_act = logsumexp(weighted_act, trial->N); // - log(n_words_by_state[STATE_POSTRETRIEVAL]);
+
+
+
 	processing_rate(trial, trial->procrate);
 
 	for ( i=1; i<= trial->N; i++ )  {
-		if(trial->states[4+i] == STATE_COMPLETE) trial->W[4+i] = 0.0;
+		if(trial->actr.word_processing_block_times[i] > trial->t) trial->W[4+i] = 0.0;
+		else if(trial->states[4+i] == STATE_COMPLETE) trial->W[4+i] = 0.0;
+		else if(trial->states[4+i] == STATE_RETRIEVAL) trial->W[4+i] = 0.0;
+		else if(trial->states[4+i] == STATE_WAITFORRETRIEVAL) trial->W[4+i] = 0.0;
+        else if(trial->states[4+i] == STATE_TRIGGERRETRIEVAL) {
+			if(trial->actr.current_retrieval_started + trial->params->mu1 < trial->t) {
+				trial->W[4+i] = trial->actr.R_count/(1000.0*trial->params->F*exp(-trial->actr.retrieval_share[i]));
+			} else {
+				trial->W[4+i] = 0.0;
+			}
+        }
+        else if(trial->states[4+i] == STATE_POSTRETRIEVAL) {
+            trial->W[4+i] = trial->actr.R_count/(1000.0*trial->params->F*exp(-trial->actr.retrieval_result.noisy_activation))*exp(weighted_act[i]-sum_weighted_act);
+        }
 	    else trial->W[4+i] = trial->procrate[i] * trial->params->alpha;
 	}
+
+
+	free_vector(double, weighted_act);
 
 }
 
@@ -364,8 +465,9 @@ double loglik_temp(W_hist * w_hist, double t) {
 }
 
 int counter_direction(swift_run * trial, int state) {
-	if(state > 4 && state <= 4 + trial->N && trial->states[state] == STATE_POSTLEXICAL) {
-		return -1;
+	if(state > 4 && state <= 4 + trial->N) {
+		if(trial->states[state] == STATE_POSTLEXICAL) return -1;
+		if(trial->states[state] == STATE_POSTRETRIEVAL) return -1;
 	}
 	return 1;
 }
@@ -419,9 +521,30 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 
 	if(state > 4 && state <= 4 + trial->N) {
 
+		int i, j = state - 4;
+
 		if(trial->n_count[state] >= trial->N_count[state] && trial->states[state] == STATE_LEXICAL) {
 			trial->n_count[state] = trial->N_count[state];
 			trial->states[state] = STATE_POSTLEXICAL;
+
+            int already_encoded_in_memory = 0, i;
+            for(i=1; i<=trial->actr.atrial->n_items; i++) {
+                if(trial->actr.atrial->items[i].trigger == j) {
+                    already_encoded_in_memory = 1;
+                    break;
+                }
+            }
+            if(!already_encoded_in_memory) {
+                actr_add_memory_for(trial->actr.atrial, sentence_prop(trial->corpus, trial->s, actr_template.memory_item_count), sentence_prop(trial->corpus, trial->s, actr_template.memory_template), j, trial->t, 1);
+            }
+            actr_prepare_retrievals_for(trial->actr.atrial, sentence_prop(trial->corpus, trial->s, actr_template.retrieval_item_count), sentence_prop(trial->corpus, trial->s, actr_template.retrieval_template), j, trial->t);
+            trial->actr.word_waits_for_retrieval[j] = 0;
+            for(i=trial->actr.atrial->n_retrievals_complete+1;i<=trial->actr.atrial->n_retrievals;i++) {
+                if(j == trial->actr.atrial->retrievals[i].trigger) trial->actr.word_waits_for_retrieval[j]++;
+            }
+            if(trial->actr.word_waits_for_retrieval[j]) {
+                trial->states[state] = STATE_WAITFORRETRIEVAL;
+            }
 		}
 		
 		if(trial->n_count[state] <= 0 && trial->states[state] == STATE_POSTLEXICAL) {
@@ -429,15 +552,61 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 			trial->states[state] = STATE_COMPLETE;
 		}
 
+
+        if( trial->states[state] == STATE_POSTRETRIEVAL && trial->n_count[state] <= 0) {
+            trial->states[state] = STATE_COMPLETE;
+            trial->n_count[state] = 0;
+        }
+
+        if( trial->states[state] == STATE_TRIGGERRETRIEVAL && trial->n_count[state] >= trial->actr.R_count) {
+            for(i=1; i<=trial->N; i++) {
+                /*if(i == retrieval_result.memory_trigger) {
+                    word_processing_block_times[i] = current_retrieval_ends + (current_retrieval_ends - current_retrieval_started) * actr_mu2;
+                }*/
+                if(trial->states[i+4] == STATE_RETRIEVAL) {
+                    trial->states[i+4] = STATE_POSTLEXICAL;
+                    trial->actr.word_processing_block_times[i] = trial->t + trial->params->mu1;
+                } else if(trial->states[i+4] == STATE_TRIGGERRETRIEVAL) {
+                    trial->states[i+4] = STATE_POSTRETRIEVAL;
+                }
+            }
+            trial->actr.retrieval_result.memory_trigger = j;
+            trial->actr.retrieval_result.latency = trial->t - trial->actr.current_retrieval_started;
+            actr_end_retrieval(trial->actr.atrial, trial->actr.retrieval_result);
+            trial->actr.atrial->n_retrievals_complete++;
+            trial->actr.current_retrieval_id = 0;
+            trial->actr.current_retrieval_trigger = 0;
+            trial->actr.current_retrieval_ends = trial->t;
+            trial->actr.last_retrieval_at = 0;
+        }
+
 	}
 
 	int i;
 	for(i = 1; i <= trial->N; i++) trial->aa[i] = (double) trial->n_count[4+i] / trial->params->aord;
+
+
+    if(trial->actr.atrial->n_retrievals_complete < trial->actr.atrial->n_retrievals && !trial->actr.current_retrieval_id) {
+        trial->actr.current_retrieval_id = trial->actr.atrial->n_retrievals_complete + 1;
+        trial->actr.current_retrieval = trial->actr.atrial->retrievals[trial->actr.current_retrieval_id];
+        trial->actr.current_retrieval_trigger = trial->actr.current_retrieval.trigger;
+        if(trial->states[4+trial->actr.current_retrieval_trigger] == STATE_WAITFORRETRIEVAL) {
+            trial->actr.word_processing_block_times[trial->actr.current_retrieval_trigger] = INFINITY;
+            trial->actr.R_count = fmax(1.0, trial->N_count[4+trial->actr.current_retrieval_trigger] * trial->params->rfrac);
+            trial->states[4+trial->actr.current_retrieval_trigger] = STATE_RETRIEVAL;
+            for(i=1;i<=trial->N;i++) {
+                trial->actr.retrieval_share[i] = -INFINITY;
+            }
+        }
+        trial->actr.last_retrieval_at = 0;
+        trial->actr.current_retrieval_started = trial->t;
+        trial->actr.current_retrieval_ends = INFINITY;
+    }
 }
 
 int check_all_words_processed(swift_run * trial) {
 	int i;
-	for(i = 1; i <= trial->N; i++) if(trial->states[4+i] != STATE_COMPLETE) return 0;
+	for(i = 1; i <= trial->N; i++) if(trial->states[4+i] != STATE_COMPLETE && trial->states[4+i] != STATE_POSTRETRIEVAL) return 0;
 	return 1;
 }
 
@@ -567,7 +736,6 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 					other_trial = clone_swift_trial(trial, 0);
 					other_trial->is_mislocated = !trial->is_mislocated;
 				}
-
 				
 				init_w_hist(&w_hist_by_stage[1]);
 				init_w_hist(&w_hist_by_stage[2]);
@@ -645,6 +813,7 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 					ll[k][i][2][N+j] = -INFINITY;
 					ll[k][i][3][N+j] = -INFINITY;
 				}
+
 
 
 			}
