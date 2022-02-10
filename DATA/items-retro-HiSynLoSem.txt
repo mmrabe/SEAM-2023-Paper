@@ -1,0 +1,8 @@
+name	NP1	DP1	NP2	VP1	DP2	NP3	VP2	VP3
+created	6	7	8	10	11	13	14	17
+cat	NP	DP	NP	VP	DP	NP	VP	VP
+mom-cat	IP	CP	I-bar	I-bar	CP2	I-bar2	I-bar2	IP
+role	spec	spec	spec	comp	spec	spec	comp	comp
+number	sing	nil	sing	nil	nil	sing	sing	nil
+NOM	yes	no	yes	nil	nil	yes	nil	nil
+sem	yes	nil	yes	nil	nil	no	nil	nil

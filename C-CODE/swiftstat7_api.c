@@ -66,6 +66,9 @@ void warn(char *fmt, ...) {
 #include "rangen_mt.c"
 #endif
 
+#include "actrlib.c"
+int actr_init = 0;
+char actr_base_path[PATH_MAX];
 
 // Some compilers enable OpenMP by default, but some require a flag such as -fopenmp to load the libraries
 // To enable threading, make sure the compiler supports OpenMP (i.e., -fopenmp) and is called without -D DISABLE_THREADS
@@ -144,13 +147,17 @@ typedef struct {
 typedef enum {
     STATE_LEXICAL=1,
     STATE_POSTLEXICAL,
+    STATE_TRIGGERRETRIEVAL,
+    STATE_WAITFORRETRIEVAL,
+    STATE_RETRIEVAL,
+    STATE_POSTRETRIEVAL,
     STATE_COMPLETE,
     N_STATES,
 } swift_state;
 
 typedef enum {
     PARTYPE_INTEGER=1, PARTYPE_DOUBLE=2
-} swift_parameter_type;
+} swift_parameter_type; 
 
 typedef struct {
     unsigned char hasval;
@@ -177,10 +184,17 @@ typedef struct {
     char **cdum;
 } swift_word;
 
+typedef struct {
+    int memory_item_count;
+    actr_memory_item * memory_template;
+    int retrieval_item_count;
+    actr_retrieval_item * retrieval_template;
+} swift_actr_template;
 
 typedef struct {
     int nw;
     swift_word *words;
+    swift_actr_template actr_template;
 } swift_sentence;
 
 typedef struct {
@@ -446,6 +460,9 @@ int require_parameters(swift_parameters *pars, int n, swift_parameter_id par_ids
 
 struct swift_files {
     FILE *fsim, *fseq, *f1, *f2, *f3;
+    #ifndef NOACTR
+    FILE *factr;
+    #endif
 };
 
 
@@ -630,6 +647,23 @@ int load_corpus(FILE *f, char* name, swift_corpus *corpus) {
         if(!load_sentence(f, &new_c.sentences[i])) {
             error(1, "Loading sentence %d failed.", i);
             return 0;
+        }
+        FILE * f_memory_items, * f_retrieval_items;
+        if(strcmp(new_c.sentences[i].words[1].cdum[1], ".") || strcmp(new_c.sentences[i].words[1].cdum[2], ".")) {
+            char path1[strlen(actr_base_path)+strlen(new_c.sentences[i].words[1].cdum[1])+2], path2[strlen(actr_base_path)+strlen(new_c.sentences[i].words[1].cdum[2])+2];
+            sprintf(path1, "%s/%s", actr_base_path, new_c.sentences[i].words[1].cdum[1]);
+            sprintf(path2, "%s/%s", actr_base_path, new_c.sentences[i].words[1].cdum[2]);
+            f_memory_items = fopen(path1, "r");
+            f_retrieval_items = fopen(path2, "r");
+            if(f_memory_items != NULL && f_retrieval_items != NULL) {
+                actr_read_memory_items(f_memory_items, &new_c.sentences[i].actr_template.memory_template, &new_c.sentences[i].actr_template.memory_item_count);
+                actr_read_retrieval_items(f_retrieval_items, &new_c.sentences[i].actr_template.retrieval_template, &new_c.sentences[i].actr_template.retrieval_item_count);
+            } else {
+                stop(1, "Could not open %s or %s!", path1, path2);
+            }
+            if(f_memory_items != NULL) fclose(f_memory_items);
+            if(f_retrieval_items != NULL) fclose(f_retrieval_items);
+
         }
     }
     *corpus = new_c;
@@ -954,6 +988,21 @@ int swift_load_model(char *environmentPath, char *parmFile, char *corpusFile, ui
      SIMULATION PARAMETERS
      ----------------------- */
 
+
+    #pragma omp critical
+    if(!actr_init) {
+        strcpy(actr_base_path, environmentPath);
+        char actrFeatureTypeFile[strlen(actr_base_path)+20];
+        sprintf(actrFeatureTypeFile, "%s/feature_types.txt", actr_base_path);
+        fin = fopen(actrFeatureTypeFile, "r");
+        if(fin == NULL) {
+            warn("“%s” not found.", actrFeatureTypeFile);
+        } else {
+            actr_read_feature_types(fin);
+            fclose(fin);
+        }
+        actr_init = 1;
+    }
 
     char environmentFile[strlen(environmentPath)+20];
     sprintf(environmentFile, "%s/swiftstat.inp", environmentPath);

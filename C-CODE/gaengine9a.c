@@ -16,14 +16,15 @@
 #define N_FIXSEQ_CDUM 0
 #define N_CORPUS_IDUM 0
 #define N_CORPUS_DDUM 0
-#define N_CORPUS_CDUM 0
+#define N_CORPUS_CDUM 2
 #define N_LOGLIKS 3
 
 // What is the version of this algorithm?
 #define SWIFT_VERSION_MAJOR 14
 #define SWIFT_VERSION_MINOR 1
 
-#define SWIFT_VARIANT "base"
+#define SWIFT_VARIANT "actr1-lrp"
+
 
 // Numerical recipes includes
 //#include "./NumericalRecipes/nrutil.c"
