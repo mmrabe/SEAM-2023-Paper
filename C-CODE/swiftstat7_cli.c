@@ -711,7 +711,7 @@ int main(int argc, char **argv) {
 					}
 				}
 
-			swift_generate(model, outpath, fixseq_id, items, num_threads, seq2fixseq, verbose);
+			swift_generate(model, outpath, fixseq_id, items, n, num_threads, seq2fixseq, verbose);
 
 			free_swift_model(model);
 
