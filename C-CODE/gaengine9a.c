@@ -491,7 +491,6 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
             loglik_spat = dvector(1, nread);                   /* support variable for fitting */
         }
 
-        int * n_words_by_state = vector(int, NW);
 
         #ifndef NOACTR
         int * word_waits_for_retrieval = vector(int, NW);
@@ -734,8 +733,6 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
                 W[4] = r_count[4]*sacc;                                 /* ... saccade execution */
 
 
-                for(i=1;i<=N_STATES;i++) n_words_by_state[i] = 0;
-                for(i=1;i<=NW;i++) n_words_by_state[as[i]]++;
 
                 #ifndef NOACTR
                 double * weighted_act = vector(double, NW);
@@ -1445,7 +1442,6 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
         free_vector(double, procrate_mod);
         #endif
 
-        free_vector(int, n_words_by_state);
         free_dvector(t_hist,1,max_t_hist_len);
         free_dmatrix(a_hist,1,max_a_hist_len,1,NW);
         free_imatrix(c_hist,1,max_c_hist_len,1,NW+4);
