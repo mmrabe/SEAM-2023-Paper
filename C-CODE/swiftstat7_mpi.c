@@ -149,11 +149,11 @@ int swift_mpi_slave() {
             if(swift_parameters_meta[parid].type == PARTYPE_INTEGER) {
                 MPI_Bcast(&idum, 1, MPI_INT, 0, mpi_comm);
                 if(verbose_mpi) printf("MPI (%d/%d) sets par %s (#%d) to %d.\n", mpi_rank+1, mpi_size, swift_parameters_meta[parid].name, parid, idum);
-                setvalbyid(sw_model->params, parid, swift_parameter_int, idum);
+                setvalbyid(sw_model->params, parid, int, idum);
             } else if(swift_parameters_meta[parid].type == PARTYPE_DOUBLE) {
                 MPI_Bcast(&ddum, 1, MPI_DOUBLE, 0, mpi_comm);
                 if(verbose_mpi) printf("MPI (%d/%d) sets par %s (#%d) to %lf.\n", mpi_rank+1, mpi_size, swift_parameters_meta[parid].name, parid, ddum);
-                setvalbyid(sw_model->params, parid, swift_parameter_dbl, ddum);
+                setvalbyid(sw_model->params, parid, double, ddum);
             } else {
                 printf("\tMPI (%d/%d) FATAL ERROR: Request received to set parameter %d but parameter type is unknown.\n", mpi_rank+1, mpi_size, parid);
                 exit(1);
@@ -164,7 +164,7 @@ int swift_mpi_slave() {
 
             if(verbose_mpi) printf("%d/%d next random number %lu, start at %d\n", mpi_rank+1, mpi_size, ranlong(&sw_model->seed), sw_trials[0]);
 
-            swift_eval(sw_model, sw_data, sw_trials, ret, 0, 0);
+            swift_eval(sw_model, sw_data, sw_trials-1, my_stack_count, ret, 0, 0);
 
             if(verbose_mpi) printf("Result %d/%d: %lf\n", mpi_rank+1, mpi_size, ret[0]);
 
@@ -177,7 +177,7 @@ int swift_mpi_slave() {
 
             if(verbose_mpi) printf("%d/%d next random number %lu, start at %d\n", mpi_rank+1, mpi_size, ranlong(&sw_model->seed), sw_trials[0]);
 
-            swift_single_eval(sw_model, sw_data, sw_trials, ret, 0, 0);
+            swift_single_eval(sw_model, sw_data, sw_trials-1, my_stack_count, ret, 0, 0);
 
             MPI_Isend(ret, N_LOGLIKS*my_stack_count, MPI_DOUBLE, 0, 0, mpi_comm, &mpi_request);
 
@@ -214,11 +214,11 @@ void swift_update_parameter_mpi(int parid, ...) {
     if(swift_parameters_meta[parid].type == PARTYPE_INTEGER) {
         int idum = va_arg(args, int);
         MPI_Bcast(&idum, 1, MPI_INT, 0, mpi_comm);
-        setvalbyid(sw_model->params, parid, swift_parameter_int, idum);
+        setvalbyid(sw_model->params, parid, int, idum);
     } else if(swift_parameters_meta[parid].type == PARTYPE_DOUBLE) {
         double ddum = va_arg(args, double);
         MPI_Bcast(&ddum, 1, MPI_DOUBLE, 0, mpi_comm);
-        setvalbyid(sw_model->params, parid, swift_parameter_dbl, ddum);
+        setvalbyid(sw_model->params, parid, double, ddum);
     } else {
         printf("\tMPI (%d/%d) FATAL ERROR: Request received to set parameter %d but parameter type is unknown.\n", mpi_rank+1, mpi_size, parid);
         exit(1);

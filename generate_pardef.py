@@ -18,6 +18,7 @@ splitter = re.compile("[ \t]+")
 parnames = []
 partypes = []
 lines1 = {}
+lines1a = []
 lines2 = []
 lines3 = []
 
@@ -32,15 +33,19 @@ with open(sys.argv[1], "r") as f:
 		dtype3 = {'i':'swift_parameter_int','d':'swift_parameter_dbl','s':'swift_parameter_str'}[info[1]]
 		parnames.append(info[0])
 		partypes.append(dtype2)
-		if dtype3 not in lines1:
-			lines1[dtype3] = []
-		lines1[dtype3].append(info[0])
+		if dtype not in lines1:
+			lines1[dtype] = []
+		lines1[dtype].append(info[0])
+		lines1a.append(info[0])
 		if len(info) >= 3:
 			lines3.append("setval(params, {parname}, {defval});".format(parname=info[0], defval=info[2]))
 
 print "typedef struct {"
 for t in lines1:
 	print "\t"+t+" "+", ".join(lines1[t])+";"
+print "\tstruct {";
+print "\t\t int "+", ".join(lines1a)+";"
+print "\t} _;";
 print "} swift_parameters;"
 
 print "#define setdefaults(params) {"+" ".join(lines3)+"}"
@@ -60,10 +65,10 @@ for i in xrange(len(parnames)):
 print "\t{0, 0, 0}"
 print "};"
 
-print "void* swift_param_addr(swift_parameters* pars, swift_parameter_id id) {"
+print "void* swift_param_addr(swift_parameters* pars, swift_parameter_id id, int type) {"
 print "\tswitch(id) {"
 for p in parnames:
-	print "\t\tcase par_"+p+": return &pars->"+p+";"
+	print "\t\tcase par_"+p+": return (type == 1 ? (void*) &(pars->"+p+") : (void*) &(pars->_."+p+"));"
 print "\t}"
 print "\tstop(1, \"Unknown parameter id!\");"
 print "\treturn NULL;"

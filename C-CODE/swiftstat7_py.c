@@ -243,9 +243,9 @@ swift_getmodel(PyObject *self, PyObject *args, PyObject *keywds)
                 field_found = 1;
                 PyObject *pval = NULL;
                 if(swift_parameters_meta[i].type == PARTYPE_INTEGER) {
-                    pval = PyInt_FromLong(valbyid(mx->params, i, swift_parameter_int));
+                    pval = PyInt_FromLong(valbyid(mx->params, i, int));
                 } else if(swift_parameters_meta[i].type == PARTYPE_DOUBLE) {
-                    pval = PyFloat_FromDouble(valbyid(mx->params, i, swift_parameter_dbl));
+                    pval = PyFloat_FromDouble(valbyid(mx->params, i, double));
                 }
                 if(pval != NULL) {
                     PyDict_SetItemString(ret, swift_parameters_meta[i].name, pval);
@@ -297,13 +297,13 @@ swift_updatemodel(PyObject *self, PyObject *args, PyObject *keywds)
                     PyErr_Format(PyExc_ValueError, "The value for “%s” must be an integer number!", param_name);
                     return NULL;
                 }
-                setvalbyid(m[model_id]->params, param_id, swift_parameter_int, (int) PyInt_AsLong(param_value));
+                setvalbyid(m[model_id]->params, param_id, int, (int) PyInt_AsLong(param_value));
             } else if(swift_parameters_meta[param_id].type == PARTYPE_DOUBLE) {
                 if(!PyFloat_Check(param_value)) {
                     PyErr_Format(PyExc_ValueError, "The value for “%s” must be a floating point number (e.g., float or double)!", param_name);
                     return NULL;
                 }
-                setvalbyid(m[model_id]->params, param_id, swift_parameter_dbl, PyFloat_AsDouble(param_value));
+                setvalbyid(m[model_id]->params, param_id, double, PyFloat_AsDouble(param_value));
             } else {
                 PyErr_Format(PyExc_ValueError, "The value for “%s” cannot be set because that parameter type cannot be handled by this module!", param_name);
                 return NULL;

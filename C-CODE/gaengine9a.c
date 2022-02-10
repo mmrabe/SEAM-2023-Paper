@@ -851,7 +851,7 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
 
                         // compute probabilities for letter position, given all target words
                         for ( i=1; i<=NW; i++) {
-                            double psac = execsacc(&kpos,&k,&i,view,border,len,NW,s1,s2,r1,r2,seed,fitting,upcoming_l_pos,ocshift,0);
+                            double psac = execsacc(params,&kpos,&k,&i,view,border,len,NW,seed,fitting,upcoming_l_pos,0);
                             // printf("Word %d (%.1lf .. %.1lf .. %.1lf): Ptar = %lf, Psac = e^%lf => %lf\n", i, border[i]-len[i], view[i], border[i], Ptar[i], psac, log(Ptar[i]) + psac);
                             Psac[i] = psac;
                         }
@@ -1204,7 +1204,7 @@ void gaengine(swift_parameters* params, swift_corpus* corpus, swift_dataset* dat
                     intended = next_tar;
                     last = k;          /* last fixation */
                     if ( fitting <= 0 ) {
-                        saccerr = execsacc(&kpos,&k,&next_tar,view,border,len,NW,s1,s2,r1,r2,seed,fitting,0,ocshift,0);
+                        saccerr = execsacc(params,&kpos,&k,&next_tar,view,border,len,NW,seed,fitting,0,0);
                     } else {
                         fitting = 1;
                         cur_fix++;

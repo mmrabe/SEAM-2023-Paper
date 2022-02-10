@@ -20,23 +20,51 @@
 
 #include "gammalike.c"
 
-#define sd(type) (s1[type] + s2[type]*d)
-#define sre(type) (r1[type] - r2[type]*d)
+void set_execsacc_pars(swift_parameters * params, int type, double * s1, double * s2, double * r1, double * r2) {
+    if(type == 1) {
+        *s1 = params->omn_fs1;
+        *s2 = params->omn_fs2;
+        *r1 = params->sre_fs1;
+        *r2 = params->sre_fs2;
+    } else if(type == 2) {
+        *s1 = params->omn_sk1;
+        *s2 = params->omn_sk2;
+        *r1 = params->sre_sk1;
+        *r2 = params->sre_sk2;
+    } else if(type == 3) {
+        *s1 = params->omn_frf1;
+        *s2 = params->omn_frf2;
+        *r1 = params->sre_frf1;
+        *r2 = params->sre_frf2;
+    } else if(type == 4) {
+        *s1 = params->omn_brf1;
+        *s2 = params->omn_brf2;
+        *r1 = params->sre_brf1;
+        *r2 = params->sre_brf2;
+    } else if(type == 5) {
+        *s1 = params->omn_rg1;
+        *s2 = params->omn_rg2;
+        *r1 = params->sre_rg1;
+        *r2 = params->sre_rg2;
+    } else {
+        error(1, "Unknown saccade type %d!", type);
+    }
+}
 
-double execsacc(double *kpos,int *k,int *next_tar,double *view,
-                double *border,int *len,int NW,double *s1,double *s2,
-                double *r1,double *r2,RANSEED_TYPE *seed, int fitting, double upcoming_letter_pos,double ocshift,int verbose)
+
+double execsacc(swift_parameters * params, double *kpos,int *k,int *next_tar,double *view,
+                double *border,int *len,int NW,RANSEED_TYPE *seed, int fitting, double upcoming_letter_pos,int verbose)
 {
     double   dist, d, knew, saccerr;
     int      l, w, type;
 
-    if(ocshift != 0.0) stop(1, "ocshift <> 0.0 is not supported for rtgamma2 saccade execution!");
+    if(params->ocshift != 0.0) stop(1, "ocshift <> 0.0 is not supported for rtgamma2 saccade execution!");
     
     dist = view[(*next_tar)] - (*kpos);
     
     /* 1. Determine saccade type */
     /*    forward saccade */
-    type = 1;
+    if ( (*next_tar) == (*k)+1 ) type = 1;
     /*    skipping saccade   */
     if ( (*next_tar)>(*k)+1 )  type = 2;
     /*    refixation saccade */
@@ -61,14 +89,19 @@ double execsacc(double *kpos,int *k,int *next_tar,double *view,
     int bwsacc = type == 5;
     int refix = type == 3;
 
+    double sd, sre, s1, s2, r1, r2;
+
     // Determine the desired properties of the landing position distribution
     // This is independent of the distribution type as long as it has a defined E(x) and Var(x)
     // In some situations, the SRE could pull E(x) below 0.0 (the reference/starting point of the distribution)
     // However, E(x) should not be below 0.5 (center of first letter/white space) because the gamma distribution is not defined for E(x) < 0.0
     if(fwsacc || refix) {
         // For forward saccades (frf & fs & sk)
-        Var_r = sq(sd(refix ? 3 : type));
-        E_r = view[*next_tar] + sre(refix ? 3 : type) - *kpos; // In reference to x0, the expected value E(x) is the center of the word PLUS sre
+        set_execsacc_pars(params, refix ? 3 : type, &s1, &s2, &r1, &r2);
+        sd = s1 + s2*d;
+        Var_r = sq(sd);
+        sre = r1 - r2*d;
+        E_r = view[*next_tar] + sre - *kpos; // In reference to x0, the expected value E(x) is the center of the word PLUS sre
         //E_r = *kpos + sre(refix ? 3 : type) - view[*next_tar]; // In reference to x0, the expected value E(x) is the center of the word PLUS sre
         if(E_r < 0.5) E_r = 0.5;
         ux_r = border[NW] - *kpos;                      // The support (valid X) of the distribution is the length of the sentence in letter spaces minus the beginning of the word
@@ -77,8 +110,11 @@ double execsacc(double *kpos,int *k,int *next_tar,double *view,
     }
     if(bwsacc || refix) {
         // For backward saccades (brf & rg)
-        Var_l = sq(sd(refix ? 4 : type));
-        E_l = *kpos - (view[*next_tar] + sre(refix ? 4 : type)); // In reference to x0, the expected value E(x) is the center of the word PLUS sre
+        set_execsacc_pars(params, refix ? 4 : type, &s1, &s2, &r1, &r2);
+        sd = s1 + s2*d;
+        Var_l = sq(sd);
+        sre = r1 - r2*d;
+        E_l = *kpos - (view[*next_tar] + sre); // In reference to x0, the expected value E(x) is the center of the word PLUS sre
         if(E_l < 0.5) E_l = 0.5;
         ux_l = *kpos;                                            // The support (valid X) of the distribution is the length of the sentence in letter spaces minus the beginning of the word
         a_l = sq(E_l) / Var_l;
