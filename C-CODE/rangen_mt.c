@@ -38,6 +38,10 @@ static inline uint64_t ranlong(RANSEED_TYPE * seed) {
 	return sfmt_genrand_uint64(&seed->sfmt);
 }
 
+static inline uint32_t ranint(RANSEED_TYPE * seed) {
+	return sfmt_genrand_uint32(&seed->sfmt);
+}
+
 void initSeed(uint64_t seed, RANSEED_TYPE * gen) {
 	sfmt_init_by_array(&gen->sfmt, (uint32_t*) &seed, 2);
 	gen->gasdev_iset = 0;
