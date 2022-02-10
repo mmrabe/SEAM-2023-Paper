@@ -368,33 +368,21 @@ SEXP swiftr_generatefile(SEXP arg1, SEXP arg2, SEXP arg3, SEXP arg4) {
   }
 #endif
 
-  swift_generate(m, dir_name, seq_name, NULL, threads, 1, 0);
+  swift_generate(m, dir_name, seq_name, NULL, 0, threads, 1, 0);
 
   return R_NilValue;
 }
 
 
 
-SEXP swiftr_generate(SEXP arg1, SEXP arg4) {
+SEXP swiftr_generate(SEXP arg1) {
   swift_model * m = (swift_model*) EXTPTR_PTR(arg1);
-  
-  int ntrials = nsentences(m->corpus)*val(m->params, runs);
 
-  swift_dataset * data = malloc(sizeof(swift_dataset));
-  data->n = ntrials;
-  data->trials = vector(swift_trial, ntrials);
+  swift_dataset * d = malloc(sizeof(swift_dataset));
+  d->name = NULL;
+  generate_swift_all(m, d);
 
-  const int threads = INTEGER(AS_INTEGER(arg4))[0];
-
-#if !defined(_OPENMP)
-  if(threads > 1) {
-    Rf_warning("You’re trying to use multithreading but this module isn’t supporting it. Please recompile with OpenMP support or set the `threads` parameter to 0 or 1.");
-  }
-#endif
-  
-  gaengine(m->params, m->corpus, data, &m->seed, NULL, 0, threads, NULL, 0, NULL);
-  
-  SEXP ret = PROTECT(R_MakeExternalPtr(data, R_NilValue, R_NilValue));
+  SEXP ret = PROTECT(R_MakeExternalPtr(d, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(ret, swiftr_gcdata, (Rboolean) 1);
   UNPROTECT(1);
 

@@ -1139,9 +1139,9 @@ void swift_eval(swift_model *m, swift_dataset* d, int * trials, int n_trials, do
     //gaengine(m->params, m->corpus, d, &m->seed, logliks, 0, threads, trials, verbose, NULL);
     swift_likelihood ll;
     loglik_swift(m, d, trials, n_trials, &ll);
-    logliks[0] = ll.spatial + ll.temporal;
-    logliks[1] = ll.temporal;
-    logliks[2] = ll.spatial;
+    logliks[0] = ll.fixation_location + ll.fixation_duration;
+    logliks[1] = ll.fixation_duration;
+    logliks[2] = ll.fixation_location;
 }
 
 void swift_eval_all(swift_model *m, swift_dataset* d, double *logliks, unsigned int threads, int verbose) {
@@ -1153,76 +1153,31 @@ void swift_eval_single(swift_model *m, swift_dataset* d, int trial, double *logl
     swift_eval(m, d, trials, 1, logliks, threads, verbose);
 }
 
-void swift_generate(swift_model* m, char* output_dir, char* seqname, int * items, unsigned int threads, int make_fixseqin, int verbose) {
+void swift_generate(swift_model* m, char* output_dir, char* seqname, int * items, int n_items, unsigned int threads, int make_fixseqin, int verbose) {
 
-    items += 1;
-
-    struct swift_files files;
-    char file_fsim[PATH_MAX], file_fseq[PATH_MAX], file_proc1[PATH_MAX], file_proc2[PATH_MAX];
-    sprintf(file_fsim, "%s/seq_%s.dat", output_dir, seqname);
+    char file_fseq[PATH_MAX];
     sprintf(file_fseq, "%s/fixseqin_%s.dat", output_dir, seqname);
-    files.fsim = fopen(file_fsim, "w");
-    if(make_fixseqin) {
-        files.fseq = fopen(file_fseq, "w");
-    } else {
-        files.fseq = NULL;
-    }
-    if(files.fsim == NULL) {
-        stop(1, "Could not open “%s” for writing!", file_fsim);
-    }
-    // sprintf(file_proc1, "%s/seq_procord1_%s.dat", output_dir, seqname);
-    // sprintf(file_proc2, "%s/seq_procord2_%s.dat", output_dir, seqname);
-    // files.f1 = fopen(file_proc1, "w");
-    // files.f2 = fopen(file_proc2, "w");
 
-    files.f3 = NULL;
+    swift_dataset data;
+    data.name = seqname;
+    generate_swift_all(m, &data);
 
-    #ifndef NOACTR
-    if(val(m->params, output_ahist)) {
-        char file_ahist[PATH_MAX];
-        sprintf(file_ahist, "%s/seq_ahist_%s.dat", output_dir, seqname);
-        files.f3 = fopen(file_ahist, "w");
-    }
-    files.factr = NULL;
-    if(val(m->params, output_actr)) {
-        char file_actr[PATH_MAX];
-        sprintf(file_actr, "%s/seq_actr_%s.dat", output_dir, seqname);
-        files.factr = fopen(file_actr, "w");
-    }
-    #endif
+    FILE * fseq = fopen(file_fseq, "w");
 
-    gaengine(m->params, m->corpus, NULL, &m->seed, NULL, 0, threads, items, verbose, &files);
+    write_dataset(fseq, data);
 
-    if(files.fsim != NULL) {
-        fflush(files.fsim);
-        fclose(files.fsim);
-    }
+    clear_dataset(data);
 
-    if(files.fseq != NULL) {
-        fflush(files.fseq);
-        fclose(files.fseq);
-    }
+    fclose(fseq);
 
-    #ifndef NOACTR
-    if(files.factr != NULL) {
-        fflush(files.factr);
-        fclose(files.factr);
-    }
-    #endif
-
-    if(files.f3 != NULL) {
-        fflush(files.f3);
-        fclose(files.f3);
-    }
 }
 
 void swift_generate_all(swift_model *m, char* output_dir, char* seqname, unsigned int threads, int make_fixseqin, int verbose) {
-    swift_generate(m, output_dir, seqname, NULL, threads, make_fixseqin, verbose);
+    swift_generate(m, output_dir, seqname, NULL, 0, threads, make_fixseqin, verbose);
 }
 
-void swift_generate_single(swift_model *m, char* output_dir, char* seqname, unsigned int sentence, int verbose) {
-    int items[] = {sentence, 0};
-    swift_generate(m, output_dir, seqname, items, 1, 0, verbose);
+void swift_generate_single(swift_model *m, char* output_dir, char* seqname, int sentence, int verbose) {
+    swift_generate(m, output_dir, seqname, &sentence - 1, 1, 1, 0, verbose);
 }
 
 #endif
