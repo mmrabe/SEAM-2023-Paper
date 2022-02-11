@@ -1146,8 +1146,8 @@ void swift_generate(swift_model* m, char* output_dir, char* seqname, int * items
     sprintf(file_fseq, "%s/fixseqin_%s.dat", output_dir, seqname);
 
     swift_dataset data;
-    data.name = seqname;
-    generate_swift_all(m, &data);
+    data.name = NULL;
+    generate_swift_some(m, items, n_items, &data);
 
     FILE * fseq = fopen(file_fseq, "w");
 

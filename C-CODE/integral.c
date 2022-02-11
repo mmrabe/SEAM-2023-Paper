@@ -909,6 +909,11 @@ void generate_swift_all(swift_model * model, swift_dataset * data) {
 }
 
 void generate_swift_some(swift_model * model, int * items, int n_items, swift_dataset * data) {
+	if(items == NULL) {
+		generate_swift_all(model , data);
+		return;
+	}
+
 	int i, j;
 	data->n = n_items * model->params->runs;
 	data->trials = vector(swift_trial, data->n);
