@@ -772,7 +772,7 @@ void actr_retrieve(actr_params params, int moment, actr_retrieval_item cues, act
 		for(j=1;j<=num_features;j++) {
 			match[i][j] = actr_find_and_compare(j, items[i], cues) == 0;
 			// checks which items exist at this moment [actr.r, l. 73]
-			exists[i][j] = items[i].creation <= moment;
+			exists[i][j] = 1; // items[i].creation <= moment;
 		}
 		// checks which items match category cue
 		for(j=1;j<=n_trials;j++) {
@@ -844,14 +844,12 @@ void actr_retrieve(actr_params params, int moment, actr_retrieval_item cues, act
 	//printf_vector(penalty, n_items, "%10.3lf");
 
 	// compute activation boost/penalty [actr.r, l. 116]
-	double ** boost = matrix(double, n_items, n_trials);
 	double ** activation = matrix(double, n_items, n_trials);
 	double ** noisy_activation = matrix(double, n_items, n_trials);
 	for(i=1;i<=n_items;i++) {
 		double activation_adjustment = extra[i] + penalty[i];
 		for(j=1;j<=n_trials;j++) {
-			boost[i][j] = activation_adjustment;
-			activation[i][j] = boost[i][j] + base_levels[i][j];
+			activation[i][j] = activation_adjustment + base_levels[i][j];
 			noisy_activation[i][j] = rlogistic(activation[i][j], params.ans, seed);
 		}
 	}
@@ -921,7 +919,6 @@ void actr_retrieve(actr_params params, int moment, actr_retrieval_item cues, act
 	free_vector(int, is_retrieval_cue);
 	free_matrix(double, noisy_activation);
 	free_matrix(double, activation);
-	free_matrix(double, boost);
 	free_vector(double, penalty);
 	free_vector(double, extra);
 	free_matrix(double, sw);

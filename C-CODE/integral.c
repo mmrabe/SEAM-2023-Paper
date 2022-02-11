@@ -332,7 +332,7 @@ void transition_rates(swift_run * trial) {
     if ( trial->actr.atrial->n_items > trial->actr.last_retrieval_at && trial->actr.current_retrieval_id ) {
         actr_retrieval_result * result = vector(actr_retrieval_result, trial->actr.atrial->runs);
         actr_retrieval_result ** all_results = matrix(actr_retrieval_result, trial->actr.atrial->runs, trial->actr.atrial->n_items);
-        actr_retrieve(get_actr_params(trial->params), INFINITY, trial->actr.current_retrieval, trial->actr.atrial->items, trial->actr.atrial->n_items, trial->actr.atrial->moments, trial->actr.atrial->n_moments, trial->actr.atrial->history, trial->actr.atrial->n_history, trial->actr.atrial->runs, result, all_results, &trial->seed, INFINITY);
+        actr_retrieve(get_actr_params(trial->params), (int) trial->t, trial->actr.current_retrieval, trial->actr.atrial->items, trial->actr.atrial->n_items, trial->actr.atrial->moments, trial->actr.atrial->n_moments, trial->actr.atrial->history, trial->actr.atrial->n_history, trial->actr.atrial->runs, result, all_results, &trial->seed, INFINITY);
         // only accept retrieval result for items we haven't looked at so far in the current retrieval
         for( i = trial->actr.last_retrieval_at + 1; i <= trial->actr.atrial->n_items ; i++ ) {
             if( trial->actr.atrial->items[i].trigger == result[1].memory_trigger ) {
@@ -535,9 +535,9 @@ void propagate_counters(swift_run * trial, double dt, int state) {
                 }
             }
             if(!already_encoded_in_memory) {
-                actr_add_memory_for(trial->actr.atrial, sentence_prop(trial->corpus, trial->s, actr_template.memory_item_count), sentence_prop(trial->corpus, trial->s, actr_template.memory_template), j, trial->t, 1);
+                actr_add_memory_for(trial->actr.atrial, sentence_prop(trial->corpus, trial->s, actr_template.memory_item_count), sentence_prop(trial->corpus, trial->s, actr_template.memory_template), j, trial->t - trial->dt, 1);
             }
-            actr_prepare_retrievals_for(trial->actr.atrial, sentence_prop(trial->corpus, trial->s, actr_template.retrieval_item_count), sentence_prop(trial->corpus, trial->s, actr_template.retrieval_template), j, trial->t);
+            actr_prepare_retrievals_for(trial->actr.atrial, sentence_prop(trial->corpus, trial->s, actr_template.retrieval_item_count), sentence_prop(trial->corpus, trial->s, actr_template.retrieval_template), j, trial->t - trial->dt);
             trial->actr.word_waits_for_retrieval[j] = 0;
             for(i=trial->actr.atrial->n_retrievals_complete+1;i<=trial->actr.atrial->n_retrievals;i++) {
                 if(j == trial->actr.atrial->retrievals[i].trigger) trial->actr.word_waits_for_retrieval[j]++;
