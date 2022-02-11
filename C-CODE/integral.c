@@ -178,17 +178,12 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 
 swift_run * clone_swift_trial(swift_run * src, unsigned int seed) {
 	swift_run * ret = malloc(sizeof(swift_run));
+	*ret = *src;
 	ret->n_count = duplicate_vector(int, src->n_count, src->N + 4);
 	ret->prev_n_count = duplicate_vector(int, src->prev_n_count, src->N + 4);
 	ret->N_count = duplicate_vector(int, src->N_count, src->N + 4);
 	ret->states = duplicate_vector(int, src->states, src->N + 4);
 	ret->W = duplicate_vector(double, src->W, src->N + 4);
-	ret->N = src->N;
-	ret->t = src->t;
-	ret->dt = src->dt;
-	ret->canc = src->canc;
-	ret->is_mislocated = src->is_mislocated;
-	ret->is_refixation = src->is_refixation;
 	ret->ptar = duplicate_vector(double, src->ptar, src->N);
 	ret->aa = duplicate_vector(double, src->aa, src->N);
 	ret->view = duplicate_vector(double, src->view, src->N);
@@ -196,29 +191,10 @@ swift_run * clone_swift_trial(swift_run * src, unsigned int seed) {
 	ret->len = duplicate_vector(int, src->len, src->N);
 	ret->aa = duplicate_vector(double, src->aa, src->N);
 	ret->procrate = duplicate_vector(double, src->procrate, src->N);
-	ret->gaze_word = src->gaze_word;
-	ret->gaze_letter = src->gaze_letter;
-	ret->corpus = src->corpus;
-	ret->params = src->params;
-	ret->s = src->s;
-	ret->saccade_target = src->saccade_target;
-	ret->dist = src->dist;
-
-	initSeed(seed ? seed : ranint(&src->seed), &ret->seed);
-
 	ret->actr.word_waits_for_retrieval = duplicate_vector(int, src->actr.word_waits_for_retrieval, src->N);
 	ret->actr.word_processing_block_times = duplicate_vector(double, src->actr.word_processing_block_times, src->N);
 	ret->actr.retrieval_share = duplicate_vector(double, src->actr.retrieval_share, src->N);
-	ret->actr.R_count = src->actr.R_count;
 	ret->actr.atrial = actr_duplicate_trial(src->actr.atrial);
-	ret->actr.retrieval_result = src->actr.retrieval_result;
-	ret->actr.current_retrieval_id = src->actr.current_retrieval_id;
-	ret->actr.current_retrieval_trigger = src->actr.current_retrieval_trigger;
-	ret->actr.current_retrieval_started = src->actr.current_retrieval_started;
-	ret->actr.current_retrieval_ends = src->actr.current_retrieval_ends;
-	ret->actr.current_retrieval = src->actr.current_retrieval;
-	ret->actr.last_retrieval_at = src->actr.last_retrieval_at;
-
 	return ret;
 }
 
