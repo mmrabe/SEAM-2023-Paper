@@ -1098,7 +1098,7 @@ void swift_generate(swift_model* m, char* output_dir, char* seqname, int * items
 
     swift_dataset data;
     data.name = NULL;
-    generate_swift_some(m, items, n_item, &data);
+    generate_swift_some(m, items, n_items, &data);
 
     FILE * fseq = fopen(file_fseq, "w");
 
