@@ -534,7 +534,7 @@ void actr_compute_base_level_activations(actr_params params, double moment, int 
 	double ** decay = matrix(double, n_trials, n_moments);
 	for(i=1;i<=n_trials;i++) {
 		for(j=1;j<=n_moments;j++) {
-			if(tj[i] > 0.0 /* is past event? */) {
+			if(tj[j] > 0.0 /* is past event? */) {
 				decay[i][j] = -params.d * log(tj[j]);
 			} else {
 				decay[i][j] = -INFINITY;
@@ -554,8 +554,8 @@ void actr_compute_base_level_activations(actr_params params, double moment, int 
 		}
 
 		for(j=1;j<=n_trials;j++) {
-			base_levels[i][j] = logsumexp(activations[j], n_trials);
-			if(isinf(base_levels[i][j])) base_levels[i][j] = 0.0;
+			base_levels[i][j] = logsumexp(activations[j], n_moments);
+			if(isinf(base_levels[i][j])) base_levels[i][j] = -INFINITY;
 		}
 	}
 
