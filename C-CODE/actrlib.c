@@ -526,22 +526,18 @@ void actr_compute_base_level_activations(actr_params params, double moment, int 
 
 	// time since last retrieval for each retrieval (converted from milliseconds) [actr.r, l. 29]
 	double * tj = vector(double, n_moments);
-	int * is_past = vector(int, n_moments);
-	int num_past_retrievals = 0;
 	for(i=1;i<=n_moments;i++) {
 		tj[i] = (moment - moments[i]) / 1000.0;
-		is_past[i] = tj[i] > 0.0;
-		num_past_retrievals++;
 	}
 
 	// the decay function tj^-d [act.r, l. 37]
 	double ** decay = matrix(double, n_trials, n_moments);
 	for(i=1;i<=n_trials;i++) {
 		for(j=1;j<=n_moments;j++) {
-			if(is_past[j]) {
-				decay[i][j] = pow(tj[j], -params.d);
+			if(tj[i] > 0.0 /* is past event? */) {
+				decay[i][j] = -params.d * log(tj[j]);
 			} else {
-				decay[i][j] = 0.0;
+				decay[i][j] = -INFINITY;
 			}
 		}
 	}
@@ -552,174 +548,20 @@ void actr_compute_base_level_activations(actr_params params, double moment, int 
 		// activations = (past == i) * decay
 		for(j=1;j<=n_trials;j++) {
 			for(k=1;k<=n_moments;k++) {
-				activations[j][k] = decay[j][k] * is_past[k] * (history[j][k] == i);
+				if(history[j][k] == i) activations[j][k] = decay[j][k];
+				else activations[j][k] = -INFINITY;
 			}
 		}
 
 		for(j=1;j<=n_trials;j++) {
-			double b = 0.0;
-			for(k=1;k<=n_moments;k++) {
-				b += activations[j][k];
-			}
-			b = log(b);
-			if(isinf(b)) b = 0.0;
-			base_levels[i][j] = b;
+			base_levels[i][j] = logsumexp(activations[j], n_trials);
+			if(isinf(base_levels[i][j])) base_levels[i][j] = 0.0;
 		}
 	}
 
 	free_matrix(double, activations);
 	free_matrix(double, decay);
-	free_vector(int, is_past);
 	free_vector(double, tj);
-}
-
-void actr_compute_overall_base_level_activation(actr_params params, double moment, int * moments, int n_moments, double * base_level) {
-	int i, j, k;
-
-	*base_level = 0.0;
-
-	// the decay function tj^-d [act.r, l. 37]
-	for(j=1;j<=n_moments;j++) {
-		double moment_decay = params.d;
-		if(moments[j] < moment) {
-			*base_level += exp(-(moment - moments[j])/1000.0 * moment_decay);
-		}
-	}
-
-}
-
-
-void actr_compute_overall_base_level_activation_by_word(actr_params params, double moment, int * moments, int n_moments, int ** history, int n_words, actr_memory_item * items, double * base_level) {
-	int i, j, k;
-
-	for(i=0;i<=n_words;i++) {
-		base_level[i] = 0.0;
-	}
-
-	// the decay function tj^-d [act.r, l. 37]
-	for(j=1;j<=n_moments;j++) {
-		double moment_decay = params.d;
-		int belonging_memory_item = history[1][j];
-		if(moments[j] < moment && belonging_memory_item) {
-			base_level[items[belonging_memory_item].trigger] += exp(-(moment - moments[j])/1000.0 * moment_decay);
-		}
-	}
-
-}
-
-void actr_compute_overall_base_level_activation_by_memory_item(actr_params params, double moment, int * moments, int n_moments, int ** history, int n_items, actr_memory_item * items, double * base_level) {
-	int i, j, k;
-
-	for(i=1;i<=n_items;i++) {
-		base_level[i] = 0.0;
-	}
-
-	// the decay function tj^-d [act.r, l. 37]
-	for(j=1;j<=n_moments;j++) {
-		double moment_decay = params.d;
-		int belonging_memory_item = history[1][j];
-		if(moments[j] < moment && belonging_memory_item) {
-			base_level[belonging_memory_item] += exp(-(moment - moments[j])/1000.0 * moment_decay);
-		}
-	}
-
-}
-
-
-
-void actr_compute_avg_overall_base_level_activation(actr_params params, double moment1, double moment2, int * moments, int n_moments, double * base_level) {
-	int i, j, k;
-
-	if(fabs(moment2 - moment1) < 0.01) {
-		actr_compute_overall_base_level_activation(params, moment1, moments, n_moments, base_level);
-		return;
-	}
-
-	*base_level = 0.0;
-
-	// the decay function tj^-d [act.r, l. 37]
-	for(j=1;j<=n_moments;j++) {
-		double moment_decay = params.d;
-		if(moments[j] < moment2) {
-			*base_level += exp(-(moment2 - moments[j])/1000.0 * moment_decay) / moment_decay * 1000.0;
-			if(moments[j] <= moment1) {
-				*base_level -= exp(-(moment1 - moments[j])/1000.0 * moment_decay) / moment_decay * 1000.0;
-			} else {
-				*base_level -= 1.0 / moment_decay;
-			}
-		}
-	}
-
-	*base_level /= (moment1 - moment2);
-
-}
-
-
-void actr_compute_avg_overall_base_level_activation_by_word(actr_params params, double moment1, double moment2, int * moments, int n_moments, int ** history, int n_words, actr_memory_item * items, double * base_level) {
-	int i, j, k;
-
-
-	if(fabs(moment2 - moment1) < 0.01) {
-		actr_compute_overall_base_level_activation_by_word(params, moment1, moments, n_moments, history, n_words, items, base_level);
-		return;
-	}
-
-	for(i=0;i<=n_words;i++) {
-		base_level[i] = 0.0;
-	}
-
-
-	// the decay function tj^-d [act.r, l. 37]
-	for(j=1;j<=n_moments;j++) {
-		double moment_decay = params.d;
-		int belonging_memory_item = history[1][j];
-		//printf("%d ", belonging_memory_item);
-		if(moments[j] < moment2 && belonging_memory_item) {
-			double act = exp(-(moment2 - moments[j]) / 1000.0 * moment_decay) / moment_decay * 1000.0;
-			if(moments[j] <= moment1) {
-				act -= exp(-(moment1 - moments[j]) / 1000.0 * moment_decay) / moment_decay * 1000.0;
-			} else {
-				act -= 1.0 / moment_decay;
-			}
-			base_level[items[belonging_memory_item].trigger] += act / (moment1 - moment2);
-		}
-	}
-	//printf("\n");
-
-}
-
-
-void actr_compute_avg_overall_base_level_activation_by_memory_item(actr_params params, double moment1, double moment2, int * moments, int n_moments, int ** history, int n_items, actr_memory_item * items, double * base_level) {
-	int i, j, k;
-
-
-	if(fabs(moment2 - moment1) < 0.01) {
-		actr_compute_overall_base_level_activation_by_memory_item(params, moment1, moments, n_moments, history, n_items, items, base_level);
-		return;
-	}
-
-	for(i=1;i<=n_items;i++) {
-		base_level[i] = 0.0;
-	}
-
-
-	// the decay function tj^-d [act.r, l. 37]
-	for(j=1;j<=n_moments;j++) {
-		double moment_decay = params.d;
-		int belonging_memory_item = history[1][j];
-		//printf("%d ", belonging_memory_item);
-		if(moments[j] < moment2 && belonging_memory_item) {
-			double act = exp(-(moment2 - moments[j]) / 1000.0 * moment_decay) / moment_decay * 1000.0;
-			if(moments[j] <= moment1) {
-				act -= exp(-(moment1 - moments[j]) / 1000.0 * moment_decay) / moment_decay * 1000.0;
-			} else {
-				act -= 1.0 / moment_decay;
-			}
-			base_level[belonging_memory_item] += act / (moment1 - moment2);
-		}
-	}
-	//printf("\n");
-
 }
 
 typedef struct {
@@ -1202,89 +1044,5 @@ void actr_prepare_retrievals_for(actr_trial * trial, int n_retrievals, actr_retr
 	}
 }
 
-void actr_perform_retrievals(actr_params params, RANSEED_TYPE * seed, actr_trial * trial, actr_retrieval_result *** output, actr_retrieval_result **** all_output, int * retrieved_items, double timeout) {
-	int i, j, n, m, k;
-	actr_retrieval_result * result = vector(actr_retrieval_result, params.runs);
-	actr_retrieval_result ** all_results = matrix(actr_retrieval_result, params.runs, trial->n_items);
-	n = trial->n_retrievals - trial->n_retrievals_complete;
-	if(retrieved_items != NULL) {
-		*retrieved_items = n;
-	}
-	if(output != NULL) {
-		*output = matrix(actr_retrieval_result, params.runs, n);
-	}
-	if(all_output != NULL) {
-		*all_output = (actr_retrieval_result***) array(actr_retrieval_result, params.runs, n, trial->n_items);
-	}
-	for(i=trial->n_retrievals_complete+1,m=0;i<=trial->n_retrievals;i++) {
-		m++;
-		actr_retrieve(params, trial->retrievals[i].moment, trial->retrievals[i], trial->items, trial->n_items, trial->moments, trial->n_moments, trial->history, trial->n_history, trial->runs, result, all_results, seed, timeout);
-		actr_end_retrieval_vec(trial, result);
-		// printf("Retrieved ");
-		// actr_fprintf_retrieval_item(stdout, item);
-		// printf(" in");
-		if(output != NULL || all_output != NULL) {
-			for(j=1;j<=params.runs;j++) {
-				if(output != NULL) (*output)[j][m] = result[j];
-				if(all_output != NULL) for(k=1;k<=trial->n_items;k++) {
-					(*all_output)[j][m][k] = all_results[j][k];
-				}
-			}
-		}
-		// printf(".\n");
-	}
-	trial->n_retrievals_complete = trial->n_retrievals;
-	free_vector(actr_retrieval_result, result);
-	free_matrix(actr_retrieval_result, all_results);
-}
-
-void actr_serial_retrievals_for(actr_params params, RANSEED_TYPE * seed, actr_trial * trial, int n_retrievals, actr_retrieval_item * items, int tk, int moment, actr_retrieval_result *** output, actr_retrieval_result **** all_output, int * retrieved_items, double timeout) {
-	if(params.runs != 1) stop(1, "Serial retrievals only work with actr runs = 1!");
-	int i, j, n, m, k;
-	actr_retrieval_item item;
-	actr_retrieval_result * result = vector(actr_retrieval_result, params.runs);
-	actr_retrieval_result ** all_results = matrix(actr_retrieval_result, params.runs, trial->n_items);
-	for(i=1,n=0;i<=n_retrievals;i++) {
-		if(items[i].moment == tk) {
-			n++;
-		}
-	}
-	if(retrieved_items != NULL) {
-		*retrieved_items = n;
-	}
-	if(output != NULL) {
-		*output = matrix(actr_retrieval_result, params.runs, n);
-	}
-	if(all_output != NULL) {
-		*all_output = (actr_retrieval_result***) array(actr_retrieval_result, 3, params.runs, n, trial->n_items);
-	}
-	double * t = vector(double, params.runs);
-	for(i=1;i<=params.runs;i++) {
-		t[i] = moment;
-	}
-	for(i=1,m=0;i<=n_retrievals;i++) {
-		if(items[i].moment == tk) {
-			m++;
-			item = items[i];
-			// ONLY WORKS WITH RUNS=1 AT THE MOMENT BECAUSE actr_begin_retrieval is not vectorized!
-			item.trigger = tk;
-			item.moment = (int) t[1];
-			actr_begin_retrieval(trial, item);
-			actr_retrieve(params, item.moment, item, trial->items, trial->n_items, trial->moments, trial->n_moments, trial->history, trial->n_history, trial->runs, result, all_results, seed, timeout);
-			actr_end_retrieval_vec(trial, result);
-			if(output != NULL || all_output != NULL) {
-				for(j=1;j<=params.runs;j++) {
-					if(output != NULL) (*output)[j][m] = result[j];
-					if(all_output != NULL) for(k=1;k<=trial->n_items;k++) {
-						(*all_output)[j][m][k] = all_results[j][k];
-					}
-				}
-			}
-		}
-	}
-	free_vector(actr_retrieval_result, result);
-	free_matrix(actr_retrieval_result, all_results);
-	free_vector(double, t);
-}
 
 #endif
