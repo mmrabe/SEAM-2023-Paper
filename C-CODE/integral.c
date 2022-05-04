@@ -332,8 +332,8 @@ void transition_rates(swift_run * trial) {
     }
 
     double * weighted_act = vector(double, trial->N);
-    for(i=1; i<=trial->N; i++) weighted_act[i] = trial->states[4+i] == STATE_POSTRETRIEVAL && !isinf(trial->actr.retrieval_share[i]) ? trial->actr.retrieval_share[i] * trial->params->mu2 : -INFINITY;
-    double sum_weighted_act = logsumexp(weighted_act, trial->N); // - log(n_words_by_state[STATE_POSTRETRIEVAL]);
+    for(i=1; i<=trial->N; i++) weighted_act[i] = !isinf(trial->actr.retrieval_share[i]) ? trial->actr.retrieval_share[i] * trial->params->mu2 : -INFINITY;
+    double sum_weighted_act = logsumexp(weighted_act, trial->N);
 
 
 
