@@ -156,6 +156,9 @@ swift_run * clone_swift_trial(swift_run * src, unsigned int seed) {
 	ret->len = duplicate_vector(int, src->len, src->N);
 	ret->aa = duplicate_vector(double, src->aa, src->N);
 	ret->procrate = duplicate_vector(double, src->procrate, src->N);
+	if(seed) {
+		initSeed(seed, &ret->seed);
+	}
 	return ret;
 }
 
@@ -538,7 +541,9 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 
 				t_fix_started = trial->t;
 				trial->gaze_letter = sequence->fixations[i].fl;
-				if(sequence->fixations[i].fw > 1) trial->gaze_letter += trial->border[sequence->fixations[i].fw-1];
+				if(sequence->fixations[i].fw > 1) {
+					trial->gaze_letter += trial->border[sequence->fixations[i].fw-1];
+				}
 				trial->gaze_word = sequence->fixations[i].fw;
 
 
