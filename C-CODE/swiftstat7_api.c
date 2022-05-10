@@ -899,7 +899,7 @@ int validate_trial(swift_trial* seq, swift_model* model) {
                 return 0;
             }
             if(seq->fixations[i].fl < 0.0 || seq->fixations[i].fl >= word_prop(model->corpus, seq->sentence, seq->fixations[i].fw, nl) + model->params->iws) {
-                error(1, "Fixation #%d in sentence no. %d lies on letter %.1lf but it must lie within [0.0, %.1lf.0) (word length)!", i, seq->sentence, seq->fixations[i].fl, word_prop(model->corpus, seq->sentence, seq->fixations[i].fw, nl) + model->params->iws);
+                error(1, "Fixation #%d in sentence no. %d lies on letter %.1lf but it must lie within [0.0, %.1lf) (word length)!", i, seq->sentence, seq->fixations[i].fl, word_prop(model->corpus, seq->sentence, seq->fixations[i].fw, nl) + model->params->iws);
                 return 0;
             }
             if(seq->fixations[i].tfix < 0) {
