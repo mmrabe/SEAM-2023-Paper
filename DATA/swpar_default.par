@@ -1,6 +1,6 @@
 delta0		7.23
 delta1		0.0
-asym		1
+asym		1.0
 eta		0.5
 alpha		1.5
 beta		0.75
@@ -49,3 +49,4 @@ sre_brf1	-2.5
 sre_brf2	-0.5
 sre_rg1		-0.0
 sre_rg2		-0.0
+iws		1.0
