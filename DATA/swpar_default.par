@@ -1,6 +1,6 @@
 delta0		7.23
 delta1		0.0
-asym		1
+asym		1.0
 eta		0.5
 alpha		1.5
 beta		0.75
@@ -58,3 +58,4 @@ d 0.5
 mu1	50.0
 mu2	0.0
 rfrac 0.2
+iws		1.0

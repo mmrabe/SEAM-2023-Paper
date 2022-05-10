@@ -154,8 +154,8 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
     double b = 0.0;
     for(i = 1; i <= N; b = ret->border[i], i++) {
     	ret->len[i] = word_prop(model->corpus, s, i, nl);
-    	ret->view[i] = b + 1.0 + 0.5 * ret->len[i];
-    	ret->border[i] = b + 1.0 + ret->len[i];
+    	ret->view[i] = b + model->params->iws + 0.5 * ret->len[i];
+    	ret->border[i] = b + model->params->iws + ret->len[i];
     }
 	ret->corpus = model->corpus;
 	ret->params = model->params;
