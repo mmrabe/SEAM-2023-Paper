@@ -493,72 +493,6 @@ swift_generatedata(PyObject *self, PyObject *args, PyObject *keywds)
     Py_RETURN_NONE;
 }
 
-static PyObject*
-swift_cite(PyObject *self, PyObject *args, PyObject *keywds)
-{
-    static char *kwlist[] = {"style", "format", NULL};
-
-    char *style = NULL, *format = NULL;
-
-    if (!PyArg_ParseTupleAndKeywords(args, keywds, "|ss", kwlist, &style, &format))
-        return NULL;
-
-    if(format == NULL)
-        format = "plain";
-
-    if(strcmp("plain", format) && strcmp("markdown", format)) {
-        PyErr_Format(PyExc_ValueError, "Invalid format '%s'. Supported formats are 'plain' and 'markdown'.", format);
-        return NULL;
-    }
-
-    int i;
-    if(style == NULL) {
-        // if style is not set, get all of the styles as a dict
-        PyObject *ret = PyDict_New();
-        for(i=0;swift_citations[i].style!=NULL;i++) {
-            char *val = NULL;
-            if(!strcmp(format, "plain"))
-                val = swift_citations[i].plain;
-            else if(!strcmp(format, "markdown"))
-                val = swift_citations[i].markdown;
-            if(val != NULL)
-                PyDict_SetItemString(ret, swift_citations[i].style, PyString_FromString(val));
-        }
-        return ret;
-    }else{
-        swift_citation *citation_style = swift_find_citation_style(style);
-        if(citation_style != NULL) {
-            char *ret = NULL;
-            if(!strcmp(format, "plain"))
-                ret = citation_style->plain;
-            else if(!strcmp(format, "markdown"))
-                ret = citation_style->markdown;
-            if(ret == NULL) {
-                PyErr_Format(PyExc_ValueError, "The citation style '%s' is not available in the requested format '%s'.", style, format);
-                return NULL;
-            }else{
-                return Py_BuildValue("s", ret);
-            }
-        }else{
-            char tmp[400] = {0};
-            for(i=0;swift_citations[i].style!=NULL;i++) {
-                if(i==0)
-                    sprintf(tmp, "%s", swift_citations[i].style);
-                else if(swift_citations[i+1].style!=NULL)
-                    sprintf(&tmp[strlen(tmp)], ", %s", swift_citations[i].style);
-                else
-                    sprintf(&tmp[strlen(tmp)], ", and %s", swift_citations[i].style);
-            }
-            PyErr_Format(PyExc_ValueError, "The citation style '%s' is not available. Supported styles are %s.", style, tmp);
-            return NULL;
-        }
-    }
-
-
-
-}
-
-
 static version module_version;
 
 static PyObject*
@@ -603,7 +537,6 @@ static PyMethodDef SwiftMethods[] = {
     {"eval", (PyCFunction)swift_loglik, METH_VARARGS | METH_KEYWORDS, "Evaluate likelihood of a dataset given a model."},
     {"version", (PyCFunction)swift_getversion, METH_VARARGS, "Get version information about the module."},
     {"freedata", (PyCFunction)swift_freedata, METH_VARARGS | METH_KEYWORDS, "Free data. This clears the memory allocated for the data. Future access to these data using their internal ID will result in a segfault and abort the application!"},
-    {"citation", (PyCFunction)swift_cite, METH_VARARGS | METH_KEYWORDS , "Return citations for SWIFT in all available formats."},
     {"cores", (PyCFunction)swift_cores, METH_VARARGS , "Get available compute cores."},
     {"validate", (PyCFunction)swift_validatedata, METH_VARARGS | METH_KEYWORDS , "Validate a loaded dataset against a loaded corpus (model)."},
     {NULL, NULL, 0, NULL}        /* Sentinel */

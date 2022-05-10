@@ -86,55 +86,6 @@ void warn(char *fmt, ...) {
 #endif
 #endif
 
-
-typedef struct {
-    char *style;
-    char *plain;
-    char *markdown;
-} swift_citation;
-
-static swift_citation swift_citations[] = {
-    {
-        "AMA",
-        "Engbert R, Nuthmann A, Richter E, Kliegl R. SWIFT: A Dynamical Model of Saccade Generation During Reading. \e[3mPsychological Review\e[23m [serial online]. October 2005;112(4):777-813.",
-        "Engbert R, Nuthmann A, Richter E, Kliegl R. SWIFT: A Dynamical Model of Saccade Generation During Reading. *Psychological Review* [serial online]. October 2005;112(4):777-813."
-    },
-    {
-        "APA",
-        "Engbert, R., Nuthmann, A., Richter, E. M., & Kliegl, R. (2005). SWIFT: A Dynamical Model of Saccade Generation During Reading. \e[3mPsychological Review, 112\e[23m, 777-813. doi:10.1037/0033-295X.112.4.777",
-        "Engbert, R., Nuthmann, A., Richter, E. M., & Kliegl, R. (2005). SWIFT: A Dynamical Model of Saccade Generation During Reading. *Psychological Review, 112*, 777-813. doi:10.1037/0033-295X.112.4.777"
-    },
-    {
-        "Chicago",
-        "Engbert, Ralf, Antje Nuthmann, Eike M. Richter, and Reinhold Kliegl. 2005. “SWIFT: A Dynamical Model of Saccade Generation During Reading.” \e[3mPsychological Review\e[23m 112, no. 4: 777-813.",
-        "Engbert, Ralf, Antje Nuthmann, Eike M. Richter, and Reinhold Kliegl. 2005. “SWIFT: A Dynamical Model of Saccade Generation During Reading.” *Psychological Review* 112, no. 4: 777-813."
-    },
-    {
-        "Harvard",
-        "Engbert, R, Nuthmann, A, Richter, E, & Kliegl, R 2005, ‘SWIFT: A Dynamical Model of Saccade Generation During Reading’, \e[3mPsychological Review\e[23m, 112, 4, pp. 777-813",
-        "Engbert, R, Nuthmann, A, Richter, E, & Kliegl, R 2005, ‘SWIFT: A Dynamical Model of Saccade Generation During Reading’, *Psychological Review*, 112, 4, pp. 777-813"
-    },
-    {
-        "MLA",
-        "Engbert, Ralf, et al. “SWIFT: A Dynamical Model of Saccade Generation during Reading.” \e[3mPsychological Review\e[23m, vol. 112, no. 4, Oct. 2005, pp. 777-813. \e[3mAPA PsycNET\e[23m, doi:10.1037/0033-295X.112.4.777.",
-        "Engbert, Ralf, et al. “SWIFT: A Dynamical Model of Saccade Generation during Reading.” *Psychological Review*, vol. 112, no. 4, Oct. 2005, pp. 777-813. *APA PsycNET*, doi:10.1037/0033-295X.112.4.777."
-    },
-    {
-        "BibTex",
-        "@article{Engbert2005,\n  Author = {Engbert, Ralf and Nuthmann, Antje and Richter, Eike M. and Kliegl, Reinhold},\n  ISSN = {0033-295X},\n  Journal = {Psychological Review},\n  Volume = {112},\n  Number = {4},\n  Pages = {777-813},\n  Title = {SWIFT: A Dynamical Model of Saccade Generation During Reading.},\n  Year = {2005},\n  DOI = {10.1037/0033-295X.112.4.777}\n}",
-        0
-    },
-    {NULL}
-};
-
-swift_citation *swift_find_citation_style(char *style_name) {
-    size_t i;
-    for(i=0;swift_citations[i].style!=NULL;i++)
-        if(!strcmp(swift_citations[i].style, style_name))
-            return &swift_citations[i];
-    return NULL;
-}
-
 typedef struct {
     unsigned int major, minor;
 } version;
