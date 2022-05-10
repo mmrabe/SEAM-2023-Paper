@@ -41,6 +41,7 @@ swift_model *sw_model = NULL;
 swift_dataset *sw_data = NULL;
 int * sw_trials = NULL;
 int loglik_evals;
+int my_stack_count;
 int * stack_load, * stack_count, ** stacks;
 
 int swift_init_mpi() {
@@ -87,7 +88,6 @@ int swift_mpi_slave() {
     double ddum;
     long super_seed;
 
-    int my_stack_count;
 
 
     do {
@@ -177,7 +177,7 @@ int swift_mpi_slave() {
 
             if(verbose_mpi) printf("%d/%d next random number %lu, start at %d\n", mpi_rank+1, mpi_size, ranlong(&sw_model->seed), sw_trials[0]);
 
-            swift_single_eval(sw_model, sw_data, sw_trials-1, my_stack_count, ret, 0, 0);
+            swift_eval(sw_model, sw_data, sw_trials-1, my_stack_count, ret, 0, 0);
 
             MPI_Isend(ret, N_LOGLIKS*my_stack_count, MPI_DOUBLE, 0, 0, mpi_comm, &mpi_request);
 
@@ -331,7 +331,7 @@ void swift_eval_mpi(double *logliks) {
     for(i=0;i<mpi_size;i++) {
         double worker_logliks[N_LOGLIKS * stack_count[i]];
         if(i == 0) {
-            swift_single_eval(sw_model, sw_data, sw_trials, worker_logliks, 0, 0);
+            swift_eval(sw_model, sw_data, sw_trials-1, my_stack_count, worker_logliks, 0, 0);
         } else {
             MPI_Recv(worker_logliks, N_LOGLIKS * stack_count[i], MPI_DOUBLE, i, 0, mpi_comm, MPI_STATUS_IGNORE);
         }

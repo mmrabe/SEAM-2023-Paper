@@ -27,7 +27,7 @@
 
 #include "swiftstat7_api.c"
 
-typedef enum {USAGE, HELP, VERSION, GENERATE, FITTING, CITATION, DEFAULTS, VALIDATE} swift_mode;
+typedef enum {USAGE, HELP, VERSION, GENERATE, FITTING, DEFAULTS, VALIDATE} swift_mode;
 
 int win_width;
 
@@ -210,7 +210,7 @@ int parse_range_literal(char * str, int * target) {
 
 void print_usage(FILE* where, char* cmd_name) {
 	fwrap(where, win_width, 0, cmd_name, " -uhvfgCd [-q] [-c cid [-p pid] [-P a=1.0,... [-P ...]] [-I snr] [-s sid] [-x] [-r seed] [-i input] [-e envdir] [-o output]%s]", usage_t_placeholder_short);
-	fwrap(where, win_width, 0, cmd_name, " --[usage|help|version|fitting|generate|citation format|defaults] [--quiet] [--corpus cid [--parix pid] [--param a=1.0,... [--param b=2.0,...]] [--sentence snr] [--seqid sid] [--fixseq] [--ranseed seed] [--input inpath] [--environ envdir] [--output outpath]%s]", usage_t_placeholder_long);
+	fwrap(where, win_width, 0, cmd_name, " --[usage|help|version|fitting|generate|defaults] [--quiet] [--corpus cid [--parix pid] [--param a=1.0,... [--param b=2.0,...]] [--sentence snr] [--seqid sid] [--fixseq] [--ranseed seed] [--input inpath] [--environ envdir] [--output outpath]%s]", usage_t_placeholder_long);
 }
 
 struct help_item {
@@ -242,7 +242,6 @@ int main(int argc, char **argv) {
 		{"usage",   no_argument, 0, 'u'},
 		{"help",   no_argument, 0, 'h'},
 		{"version",   no_argument, 0, 'v'},
-		{"citation",   required_argument, 0, 'C'},
 		{"fitting",   no_argument, 0, 'f'},
 		{"generate",   no_argument, 0, 'g'},
 		{"defaults",   no_argument, 0, 'd'},
@@ -271,19 +270,11 @@ int main(int argc, char **argv) {
 	sprintf(threads_helpmsg, "How many subsets to evaluate in parallel (current default: %d). Only implemented for fitting mode. Note: As this as an OpenMP version, the default can be modified by setting the environment variable OMP_NUM_THREADS.", default_num_threads);
 	#endif
 
-	static char citation_helpmsg[500];
-	char tmp[200] = {0};
-	for(i=0;swift_citations[i].style!=NULL;i++) {
-		sprintf(&tmp[strlen(tmp)], ", %s", swift_citations[i].style);
-	}
-	sprintf(citation_helpmsg, "Show citation for this version. Citation style to be passed as an additional argument (supported: all%s). If passed with an asterisk (*) after the citation style (e.g., all*), output is in Markdown format.", tmp);
-
 	// these are help messages for CLI arguments
 	static struct help_item help_items[] = {
 		{'h', "Show help message. Other options ignored."},
 		{'u', "Show command-line usage (short help). Other options ignored."},
 		{'v', "Show current version. Other options ignored."},
-		{'C', citation_helpmsg},
 		{'f', "Enter fitting mode."},
 		{'g', "Enter generative mode."},
 		{'V', "Validate fixation sequences."},
@@ -327,7 +318,7 @@ int main(int argc, char **argv) {
 	int num_threads = default_num_threads;
 
 	// default values for these arguments will be set after argument parsing -> NULL marks no value has been set
-	char *corpus_id = NULL, *fixseq_id = NULL, *par_id = NULL, *environ_path = NULL, *inpath = NULL, *outpath = NULL, *citation_style=NULL;
+	char *corpus_id = NULL, *fixseq_id = NULL, *par_id = NULL, *environ_path = NULL, *inpath = NULL, *outpath = NULL;
 
 	int * items = NULL;
 	int n;
@@ -365,11 +356,6 @@ int main(int argc, char **argv) {
 				break;
 			case 'v':
 				mode = VERSION;
-				break;
-			case 'C':
-				mode = CITATION;
-				if(strcmp(optarg,"all")) // if argument is "all", leave NULL
-					citation_style = optarg;
 				break;
 			// options
 			case 'c':
@@ -528,42 +514,6 @@ int main(int argc, char **argv) {
 	}else if(mode == VERSION) {
 		printf("%s\n", version_string);
 		return 0;
-	}else if(mode == CITATION) {
-		unsigned int markdown = 0;
-		if(citation_style != NULL && citation_style[strlen(citation_style)-1] == '*') {
-			markdown = 1;
-			citation_style[strlen(citation_style)-1] = 0;
-		}
-		if(citation_style == NULL || !strcmp(citation_style, "all")) {
-			for(i=0;swift_citations[i].style!=NULL;i++) {
-				char *ret = NULL;
-				if(markdown) {
-					ret = swift_citations[i].markdown;
-				} else {
-					ret = swift_citations[i].plain;
-				}
-				if(ret!= NULL)
-					fprintf(stdout, "\e[2m%s\e[22m: %s\n", swift_citations[i].style, ret);
-			}
-			return 0;
-		} else {
-			swift_citation *swift_cite = swift_find_citation_style(citation_style);
-			if(swift_cite != NULL) {
-				char *ret = NULL;
-				if(markdown) {
-					ret = swift_cite->markdown;
-				} else {
-					ret = swift_cite->plain;
-				}
-				if(ret == NULL) {
-					stop(1, "The citation style '%s' is not available in the requested format!", citation_style);
-				}else{
-					fprintf(stdout, "%s\n", ret);
-					return 0;
-				}
-			}
-			stop(1, "Unknown citation format '%s'! Please see help (%s -h) for supported citation formats!", citation_style, basename(argv[0]));
-		}
 	}else if(mode == FITTING || mode == GENERATE || mode == VALIDATE) {
 		char corpus_file[PATH_MAX], fixseq_file[PATH_MAX], par_file[PATH_MAX];
 		if(inpath  == NULL) 
