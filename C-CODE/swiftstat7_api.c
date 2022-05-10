@@ -765,34 +765,6 @@ int load_trial(FILE *f, swift_trial *ret) {
     return 1;
 }
 
-int validate_trial(swift_trial* seq, swift_corpus* corpus) {
-    int i;
-    if(seq->sentence < 1 || seq->sentence > nsentences(corpus)) {
-        error(1, "A fixation sequence refers to sentence no. %d, which does not exist in this corpus (contains %d sentences)!", seq->sentence, nsentences(corpus));
-        return 0;
-    } else {
-        for(i=1;i<=seq->nfix;i++) {
-            if(seq->fixations[i].fw < 1 || seq->fixations[i].fw > nwords(corpus, seq->sentence)) {
-                error(1, "Fixation #%d in sentence no. %d lies on word %d, which does not exist in this sentence (contains %d words)!", i, seq->sentence, seq->fixations[i].fw, nwords(corpus, seq->sentence));
-                return 0;
-            }
-            if(seq->fixations[i].fl < 0.0 || seq->fixations[i].fl >= word_prop(corpus, seq->sentence, seq->fixations[i].fw, nl) + 1) {
-                error(1, "Fixation #%d in sentence no. %d lies on letter %.1lf but it must lie within [0.0, %d.0) (word length)!", i, seq->sentence, seq->fixations[i].fl, word_prop(corpus, seq->sentence, seq->fixations[i].fw, nl) + 1);
-                return 0;
-            }
-            if(seq->fixations[i].tfix < 0) {
-                error(1, "Fixation duration #%d in sentence no. %d must not be negative!", i, seq->sentence);
-                return 0;
-            }
-            if(i < seq->nfix && seq->fixations[i].tsac < 0) {
-                error(1, "Saccade duration #%d in sentence no. %d must not be negative!", i, seq->sentence);
-                return 0;
-            }
-        }
-    }
-    return 1;
-}
-
 void write_trial(FILE *f, swift_trial seq) {
     int i, j;
     for(i=1;i<=seq.nfix;i++) {
@@ -870,17 +842,6 @@ int load_dataset(FILE *f, char *name, swift_dataset* ret) {
     return 1;
 }
 
-int validate_dataset(swift_dataset* seqs, swift_corpus* corpus) {
-    int i;
-    for(i = 1; i <= ntrials(seqs); i++) {
-        if(!validate_trial(&seqs->trials[i], corpus)) {
-            error(1, "There was a validation error in sequence #%d!", i);
-            return 0;
-        }
-    }
-    return 1;
-}
-
 void write_dataset(FILE *f, swift_dataset seqs) {
     int i;
     for(i=1;i<=seqs.n;i++) {
@@ -924,6 +885,46 @@ typedef struct {
     swift_corpus* corpus;
     RANSEED_TYPE seed;
 } swift_model;
+
+
+int validate_trial(swift_trial* seq, swift_model* model) {
+    int i;
+    if(seq->sentence < 1 || seq->sentence > nsentences(model->corpus)) {
+        error(1, "A fixation sequence refers to sentence no. %d, which does not exist in this corpus (contains %d sentences)!", seq->sentence, nsentences(model->corpus));
+        return 0;
+    } else {
+        for(i=1;i<=seq->nfix;i++) {
+            if(seq->fixations[i].fw < 1 || seq->fixations[i].fw > nwords(model->corpus, seq->sentence)) {
+                error(1, "Fixation #%d in sentence no. %d lies on word %d, which does not exist in this sentence (contains %d words)!", i, seq->sentence, seq->fixations[i].fw, nwords(model->corpus, seq->sentence));
+                return 0;
+            }
+            if(seq->fixations[i].fl < 0.0 || seq->fixations[i].fl >= word_prop(model->corpus, seq->sentence, seq->fixations[i].fw, nl) + model->params->iws) {
+                error(1, "Fixation #%d in sentence no. %d lies on letter %.1lf but it must lie within [0.0, %.1lf.0) (word length)!", i, seq->sentence, seq->fixations[i].fl, word_prop(model->corpus, seq->sentence, seq->fixations[i].fw, nl) + model->params->iws);
+                return 0;
+            }
+            if(seq->fixations[i].tfix < 0) {
+                error(1, "Fixation duration #%d in sentence no. %d must not be negative!", i, seq->sentence);
+                return 0;
+            }
+            if(i < seq->nfix && seq->fixations[i].tsac < 0) {
+                error(1, "Saccade duration #%d in sentence no. %d must not be negative!", i, seq->sentence);
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+int validate_dataset(swift_dataset* seqs, swift_model* model) {
+    int i;
+    for(i = 1; i <= ntrials(seqs); i++) {
+        if(!validate_trial(&seqs->trials[i], model)) {
+            error(1, "There was a validation error in sequence #%d!", i);
+            return 0;
+        }
+    }
+    return 1;
+}
 
 void free_swift_model(swift_model *obj) {
     free_parameters(obj->params);
@@ -1058,7 +1059,7 @@ int swift_load_data(char *fixseqFile, swift_dataset **dat, int verbose)
 }
 
 int swift_validate(swift_dataset *dat, swift_model* m) {
-    return validate_dataset(dat, m->corpus);
+    return validate_dataset(dat, m);
 }
 
 int swift_load_data_std(char *inputPath, char *seqName, swift_dataset **dat, int verbose) {
