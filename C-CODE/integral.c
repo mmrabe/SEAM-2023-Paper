@@ -334,11 +334,6 @@ void transition_rates(swift_run * trial) {
         trial->actr.last_retrieval_at = trial->actr.atrial->n_items;
     }
 
-    double * weighted_act = vector(double, trial->N);
-    for(i=1; i<=trial->N; i++) weighted_act[i] = !isinf(trial->actr.retrieval_share[i]) ? trial->actr.retrieval_share[i] * trial->params->mu2 : -INFINITY;
-    double sum_weighted_act = logsumexp(weighted_act, trial->N);
-
-
 
 	processing_rate(trial, trial->procrate);
 
@@ -355,13 +350,10 @@ void transition_rates(swift_run * trial) {
 			}
         }
         else if(trial->states[4+i] == STATE_POSTRETRIEVAL) {
-            trial->W[4+i] = trial->actr.R_count/(1000.0*trial->params->F*exp(-trial->actr.retrieval_result.noisy_activation))*exp(weighted_act[i]-sum_weighted_act);
+            trial->W[4+i] = trial->actr.R_count/(1000.0*trial->params->F*exp(-trial->actr.retrieval_share[i]));
         }
 	    else trial->W[4+i] = trial->procrate[i] * trial->params->alpha;
 	}
-
-
-	free_vector(double, weighted_act);
 
 }
 
