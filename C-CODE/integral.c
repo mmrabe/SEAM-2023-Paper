@@ -284,6 +284,13 @@ void counter_base_rates(swift_run * trial, double * W) {
 	} else {
     	ifovea = (double) trial->N_count[trial->gaze_word+4] / trial->params->aord;
 	}
+	double iretrieval = 0.0;
+	for(i=1; i <= trial->N; i++) {
+		if(trial->states[i+4] == STATE_TRIGGERRETRIEVAL) {
+			iretrieval += 1.0 - (double) trial->n_count[i+4] / trial->actr.R_count;
+		}
+	}
+    ifovea += iretrieval;
     for(i=trial->gaze_word+1, iparafovea = 0.0; i <= trial->N; i++)  {
 		if(trial->states[i] == STATE_LEXICAL) {
         	iparafovea += trial->aa[i];
