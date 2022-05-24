@@ -11,6 +11,9 @@ typedef struct {
 } W_hist;
 
 typedef struct {
+typedef struct swift_run swift_run;
+
+struct swift_run {
 	int * prev_n_count;
 	int * n_count;
 	int * N_count;
@@ -35,7 +38,15 @@ typedef struct {
 	int is_mislocated, is_refixation;
 	int canc;
 	double dt;
-} swift_run;
+	struct {
+		void (*transition_rates_calculated)(struct swift_run *);
+		void (*state_selected)(struct swift_run *);
+		void (*counters_propagated)(struct swift_run *);
+	} handlers;
+};
+
+
+#define log_handler(trial, event) ((trial)->handlers.event == NULL ? NULL : (trial)->handlers.event(trial))
 
 typedef struct {
 	double fixation_location, fixation_duration, saccade_duration;
@@ -53,6 +64,8 @@ void init_w_hist(W_hist * w_hist) {
 
 void clear_w_hist(W_hist w_hist) {
 	if(w_hist.hist != NULL) free_matrix(double, w_hist.hist);
+	w_hist.ar_size = 0;
+	w_hist.length = 0;
 }
 
 void append_w_hist(W_hist * w_hist, double a, double b) {
@@ -94,6 +107,9 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 	ret->N_count = vector(int, N+4);
 	ret->ptar = vector(double, N);
 	ret->W = vector(double, N+4);
+	ret->handlers.transition_rates_calculated = NULL;
+	ret->handlers.state_selected = NULL;
+	ret->handlers.counters_propagated = NULL;
 	ret->is_mislocated = 0;
 	ret->is_refixation = 0;
 	ret->canc = 0;
@@ -477,14 +493,17 @@ void swift_run_until_event(swift_run * trial, int check(swift_run * trial, va_li
 	/* update transition rates */
 	while(1) {
 		transition_rates(trial);
+		log_handler(trial, transition_rates_calculated);
 		/* pass variable arguments as va_list to conditional function */
 		va_start(args, params);
 		if(check(trial, args)) break;
 		va_end(args);
 		/* select next transition and timestep */
 		select_state(trial, &trial->dt, &state);
+		log_handler(trial, state_selected);
 		/* execute transition */
 		propagate_counters(trial, trial->dt, state);
+		log_handler(trial, counters_propagated);
 		/* if logging handler was given, log new state */
 		if(log_trial != NULL) {
 			log_trial(trial, state, params);
