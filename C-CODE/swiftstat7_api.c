@@ -1045,20 +1045,27 @@ void swift_eval_single(swift_model *m, swift_dataset* d, int trial, double *logl
 
 void swift_generate(swift_model* m, char* output_dir, char* seqname, int * items, int n_items, unsigned int threads, int make_fixseqin, int verbose) {
 
-    char file_fseq[PATH_MAX];
+    char file_fseq[PATH_MAX], file_ahist[PATH_MAX], file_evts[PATH_MAX];
     sprintf(file_fseq, "%s/fixseqin_%s.dat", output_dir, seqname);
+    sprintf(file_evts, "%s/events_%s.dat", output_dir, seqname);
+    sprintf(file_ahist, "%s/ahist_%s.dat", output_dir, seqname);
+
+    swift_output_files files;
+    files.fixation_sequence = fopen(file_fseq, "w");
+    files.activation_history = fopen(file_ahist, "w");
+    files.events = fopen(file_evts, "w");
 
     swift_dataset data;
     data.name = NULL;
-    generate_swift_some(m, items, n_items, &data);
+    generate_swift_some(m, items, n_items, &data, &files);
 
-    FILE * fseq = fopen(file_fseq, "w");
-
-    write_dataset(fseq, data);
+    write_dataset(files.fixation_sequence, data);
 
     clear_dataset(data);
 
-    fclose(fseq);
+    fclose(files.fixation_sequence);
+    fclose(files.activation_history);
+    fclose(files.events);
 
 }
 

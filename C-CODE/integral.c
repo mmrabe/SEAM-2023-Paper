@@ -10,6 +10,12 @@ typedef struct {
 	int length;
 } W_hist;
 
+typedef struct {
+	FILE * fixation_sequence;
+	FILE * activation_history;
+	FILE * events;
+} swift_output_files;
+
 typedef struct swift_run swift_run;
 
 struct swift_run {
@@ -47,10 +53,30 @@ struct swift_run {
 		void (*saccade_executed)(struct swift_run *);
 		void (*counters_propagated)(struct swift_run *);
 	} handlers;
+	swift_output_files files;
 };
 
 
-#define log_handler(trial, event, ...) ((trial)->handlers.event == NULL ? NULL : (trial)->handlers.event(trial __VA_OPT__(,) __VA_ARGS__))
+#define log_handler(trial, event, ...) ((trial)->handlers.event == NULL ? NULL : (trial)->handlers.event((trial) __VA_OPT__(,) __VA_ARGS__))
+
+#define log_event(trial, fmt, ...) \
+	_Pragma("omp critical(event_file)") \
+	if(trial->files.events != NULL) { \
+		fprintf(trial->files.events, "%d\t%.2lf\t", trial->s, trial->t); \
+		fprintf(trial->files.events, fmt __VA_OPT__(,) __VA_ARGS__); \
+		fputs("\n", trial->files.events); \
+	}
+
+void log_activation_to_file(swift_run * trial) {
+	#pragma omp critical(activation_history_file)
+	if(trial->files.activation_history != NULL) {
+		fprintf(trial->files.activation_history, "%d\t%.2lf", trial->s, trial->t);
+		for(int i = 1; i <= trial->N + 4; i++) {
+			fprintf(trial->files.activation_history, "\t%d", trial->n_count[i]);
+		}
+		fputs("\n", trial->files.activation_history);
+	}
+}
 
 typedef struct {
 	double fixation_location, fixation_duration, saccade_duration;
@@ -111,6 +137,7 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 	ret->N_count = vector(int, N+4);
 	ret->ptar = vector(double, N);
 	ret->W = vector(double, N+4);
+	ret->s = s;
 	ret->handlers.transition_rates_calculated = NULL;
 	ret->handlers.state_selected = NULL;
 	ret->handlers.target_selected = NULL;
@@ -120,6 +147,9 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 	ret->w_hist_by_stage.lab.hist = NULL;
 	ret->w_hist_by_stage.nlab.hist = NULL;
 	ret->w_hist_by_stage.sacc.hist = NULL;
+	ret->files.fixation_sequence = NULL;
+	ret->files.activation_history = NULL;
+	ret->files.events = NULL;
 	ret->is_mislocated = 0;
 	ret->is_refixation = 0;
 	ret->canc = 0;
@@ -348,7 +378,6 @@ void execute_saccade(swift_run * trial) {
 	trial->is_refixation = previous_word == trial->gaze_word;
 
 	log_handler(trial, saccade_executed);
-
 }
 
 double loglik_spat_cond(swift_run * trial, int word, double x) {
@@ -408,9 +437,11 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 		trial->n_count[2] = 0;
 		if(trial->states[2]) {
 			trial->canc++;
+			log_event(trial, "sc");
 		} else {
 			trial->canc = 0;
 			trial->states[2] = 1;
+			log_event(trial, "lab");
 		}
 	}
 
@@ -421,6 +452,8 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 		trial->states[3] = 1;
 		trial->states[2] = 0;
 		select_target(trial);
+		log_event(trial, "st %d", trial->saccade_target);
+		log_event(trial, "nlab");
 	}
 
 	if(trial->n_count[3] >= trial->N_count[3]) {
@@ -429,6 +462,7 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 		trial->n_count[4] = 0;
 		trial->states[4] = 1;
 		trial->states[3] = 0;
+		log_event(trial, "sb");
 	}
 
 	if(trial->n_count[4] >= trial->N_count[4]) {
@@ -440,17 +474,20 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 			trial->n_count[2] = 0;
 			trial->states[2] = 1;
 		}
+		log_event(trial, "se");
 	}
 
 	if(state > 4 && state <= 4 + trial->N) {
 
 		if(trial->n_count[state] >= trial->N_count[state] && trial->states[state] == STATE_LEXICAL) {
 			trial->n_count[state] = trial->N_count[state];
+			log_event(trial, "s %d %d %d", state-4, trial->states[state], STATE_POSTLEXICAL);
 			trial->states[state] = STATE_POSTLEXICAL;
 		}
 		
 		if(trial->n_count[state] <= 0 && trial->states[state] == STATE_POSTLEXICAL) {
 			trial->n_count[state] = 0;
+			log_event(trial, "s %d %d %d", state-4, trial->states[state], STATE_COMPLETE);
 			trial->states[state] = STATE_COMPLETE;
 		}
 
@@ -697,8 +734,12 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 }
 
 
-void generate_swift_single(swift_model * model, int s, swift_trial * sequence, unsigned int seed) {
+void generate_swift_single(swift_model * model, int s, swift_trial * sequence, unsigned int seed, swift_output_files * files) {
 	swift_run * trial = new_swift_trial(model, s, seed);
+
+	trial->handlers.counters_propagated = log_activation_to_file;
+
+	if(files != NULL) trial->files = *files;
 
 	int Nfix = 0;
 	int ar_size = 20;
@@ -737,7 +778,7 @@ void generate_swift_single(swift_model * model, int s, swift_trial * sequence, u
 
 }
 
-void generate_swift_all(swift_model * model, swift_dataset * data) {
+void generate_swift_all(swift_model * model, swift_dataset * data, swift_output_files * files) {
 	int i, j;
 	data->n = nsentences(model->corpus) * model->params->runs;
 	unsigned int * seeds = vector(unsigned int, data->n);
@@ -748,15 +789,15 @@ void generate_swift_all(swift_model * model, swift_dataset * data) {
 	#pragma omp parallel for collapse(2) private(i,j)
 	for(i = 1; i <= nsentences(model->corpus); i++) {
 		for(j = 1; j <= model->params->runs; j++) {
-			generate_swift_single(model, i, &data->trials[(i-1)*model->params->runs+j], seeds[(i-1)*model->params->runs+j]);
+			generate_swift_single(model, i, &data->trials[(i-1)*model->params->runs+j], seeds[(i-1)*model->params->runs+j], files);
 		}
 	}
 	free_vector(unsigned int, seeds);
 }
 
-void generate_swift_some(swift_model * model, int * items, int n_items, swift_dataset * data) {
+void generate_swift_some(swift_model * model, int * items, int n_items, swift_dataset * data, swift_output_files * files) {
 	if(items == NULL) {
-		generate_swift_all(model , data);
+		generate_swift_all(model, data, files);
 		return;
 	}
 
@@ -770,7 +811,7 @@ void generate_swift_some(swift_model * model, int * items, int n_items, swift_da
 	#pragma omp parallel for collapse(2) private(i,j)
 	for(i = 1; i <= n_items; i++) {
 		for(j = 1; j <= model->params->runs; j++) {
-			generate_swift_single(model, items[i], &data->trials[(i-1)*model->params->runs+j], seeds[(i-1)*model->params->runs+j]);
+			generate_swift_single(model, items[i], &data->trials[(i-1)*model->params->runs+j], seeds[(i-1)*model->params->runs+j], files);
 		}
 	}
 	free_vector(unsigned int, seeds);
