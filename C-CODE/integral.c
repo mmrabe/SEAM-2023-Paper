@@ -15,7 +15,9 @@ typedef struct {
 	int length;
 } W_hist;
 
-typedef struct {
+typedef struct swift_run swift_run;
+
+struct swift_run {
 	int * prev_n_count;
 	int * n_count;
 	int * N_count;
@@ -36,6 +38,9 @@ typedef struct {
 	double * border;
 	double * ptar;
 	double * W;
+	struct {
+		W_hist glob, lab, nlab, sacc;
+	} w_hist_by_stage;
 	int * len;
 	int is_mislocated, is_refixation;
 	int canc;
@@ -54,7 +59,17 @@ typedef struct {
         actr_retrieval_item current_retrieval;
         int last_retrieval_at;
 	} actr;
-} swift_run;
+	struct {
+		void (*transition_rates_calculated)(struct swift_run *);
+		void (*state_selected)(struct swift_run *, int state);
+		void (*target_selected)(struct swift_run *, int target);
+		void (*saccade_executed)(struct swift_run *);
+		void (*counters_propagated)(struct swift_run *);
+	} handlers;
+};
+
+
+#define log_handler(trial, event, ...) ((trial)->handlers.event == NULL ? NULL : (trial)->handlers.event(trial __VA_OPT__(,) __VA_ARGS__))
 
 
 
@@ -74,6 +89,8 @@ void init_w_hist(W_hist * w_hist) {
 
 void clear_w_hist(W_hist w_hist) {
 	if(w_hist.hist != NULL) free_matrix(double, w_hist.hist);
+	w_hist.ar_size = 0;
+	w_hist.length = 0;
 }
 
 void append_w_hist(W_hist * w_hist, double a, double b) {
@@ -115,6 +132,13 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 	ret->N_count = vector(int, N+4);
 	ret->ptar = vector(double, N);
 	ret->W = vector(double, N+4);
+	ret->handlers.transition_rates_calculated = NULL;
+	ret->handlers.state_selected = NULL;
+	ret->handlers.counters_propagated = NULL;
+	ret->w_hist_by_stage.glob.hist = NULL;
+	ret->w_hist_by_stage.lab.hist = NULL;
+	ret->w_hist_by_stage.nlab.hist = NULL;
+	ret->w_hist_by_stage.sacc.hist = NULL;
 	ret->is_mislocated = 0;
 	ret->is_refixation = 0;
 	ret->canc = 0;
@@ -179,6 +203,10 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 swift_run * clone_swift_trial(swift_run * src, unsigned int seed) {
 	swift_run * ret = malloc(sizeof(swift_run));
 	*ret = *src;
+	ret->w_hist_by_stage.glob.hist = duplicate_matrix(double, src->w_hist_by_stage.glob.hist, 2, src->w_hist_by_stage.glob.ar_size);
+	ret->w_hist_by_stage.nlab.hist = duplicate_matrix(double, src->w_hist_by_stage.nlab.hist, 2, src->w_hist_by_stage.nlab.ar_size);
+	ret->w_hist_by_stage.lab.hist = duplicate_matrix(double, src->w_hist_by_stage.lab.hist, 2, src->w_hist_by_stage.lab.ar_size);
+	ret->w_hist_by_stage.sacc.hist = duplicate_matrix(double, src->w_hist_by_stage.sacc.hist, 2, src->w_hist_by_stage.sacc.ar_size);
 	ret->n_count = duplicate_vector(int, src->n_count, src->N + 4);
 	ret->prev_n_count = duplicate_vector(int, src->prev_n_count, src->N + 4);
 	ret->N_count = duplicate_vector(int, src->N_count, src->N + 4);
@@ -202,6 +230,10 @@ swift_run * clone_swift_trial(swift_run * src, unsigned int seed) {
 }
 
 void free_swift_trial(swift_run * trial) {
+	clear_w_hist(trial->w_hist_by_stage.glob);
+	clear_w_hist(trial->w_hist_by_stage.nlab);
+	clear_w_hist(trial->w_hist_by_stage.lab);
+	clear_w_hist(trial->w_hist_by_stage.sacc);
 	free_vector(int, trial->prev_n_count);
 	free_vector(int, trial->n_count);
 	free_vector(int, trial->N_count);
@@ -400,6 +432,7 @@ void select_target(swift_run * trial) {
 	}
 	trial->saccade_target = i;
 	trial->dist = fabs( trial->view[i] - trial->gaze_letter );
+	log_handler(trial, target_selected, i);
 }
 
 void execute_saccade(swift_run * trial) {
@@ -410,6 +443,8 @@ void execute_saccade(swift_run * trial) {
 
 	trial->is_mislocated = trial->saccade_target != trial->gaze_word;
 	trial->is_refixation = previous_word == trial->gaze_word;
+
+	log_handler(trial, saccade_executed);
 
 }
 
@@ -638,31 +673,32 @@ int event_time_passed_or_saccade_started(swift_run * trial, va_list args) {
 	return check_time_passed(trial, t) || check_state_changed(trial, 4, 1);
 }
 
-void swift_run_until_event(swift_run * trial, int check(swift_run * trial, va_list params), void log_trial(swift_run * trial, int state, void * params), void * params, ...) {
+void log_transition_to_history(struct swift_run * trial, int state) {
+	if(state == 1) append_w_hist(&trial->w_hist_by_stage.glob, 1.0, trial->W[1]);
+	else if(state == 2) append_w_hist(&trial->w_hist_by_stage.lab, 1.0, trial->W[2]);
+	else if(state == 3) append_w_hist(&trial->w_hist_by_stage.nlab, 1.0, trial->W[3]);
+	else if(state == 4) append_w_hist(&trial->w_hist_by_stage.sacc, 1.0, trial->W[4]);
+}
+
+void swift_run_until_event(swift_run * trial, int check(swift_run * trial, va_list params), ...) {
 	int state;
 	va_list args;
 	/* update transition rates */
 	while(1) {
 		transition_rates(trial);
+		log_handler(trial, transition_rates_calculated);
 		/* pass variable arguments as va_list to conditional function */
-		va_start(args, params);
+		va_start(args, check);
 		if(check(trial, args)) break;
 		va_end(args);
 		/* select next transition and timestep */
 		select_state(trial, &trial->dt, &state);
+		log_handler(trial, state_selected, state);
 		/* execute transition */
 		propagate_counters(trial, trial->dt, state);
-		/* if logging handler was given, log new state */
-		if(log_trial != NULL) {
-			log_trial(trial, state, params);
-		}
+		log_handler(trial, counters_propagated);
+		/* log new state */
 		/* update transition rates */
-	}
-}
-
-void log_transition_to_history(swift_run * trial, int state, void * params) {
-	if(state >= 1 && state <= 4) {
-		append_w_hist(&((W_hist*) params)[state], 1.0, trial->W[state]);
 	}
 }
 
@@ -694,14 +730,11 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 			double mlp = 0.0;
 
 			swift_run * trial = new_swift_trial(model, sequence->sentence, seeds[j+(k-1)*N]);
+			// set an event handler for when a new state is selected -> save to transition log within trial (trial->w_hist_by_stage)
+			trial->handlers.state_selected = log_transition_to_history;
 			swift_run * other_trial;
 
 			W_hist w_hist;
-			W_hist * w_hist_by_stage = vector(W_hist, 4);
-			w_hist_by_stage[1].hist = NULL;
-			w_hist_by_stage[2].hist = NULL;
-			w_hist_by_stage[3].hist = NULL;
-			w_hist_by_stage[4].hist = NULL;
 			w_hist.hist = NULL;
 
 			for(i = 1; i <= sequence->nfix; i++) {
@@ -720,26 +753,26 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 
 				p_variation = trial->is_mislocated ? mlp : 1.0 - mlp;
 
+				init_w_hist(&trial->w_hist_by_stage.glob);
+				init_w_hist(&trial->w_hist_by_stage.lab);
+				init_w_hist(&trial->w_hist_by_stage.nlab);
+				init_w_hist(&trial->w_hist_by_stage.sacc);
+				init_w_hist(&w_hist);
+
 				if(i > 1) {
 					other_trial = clone_swift_trial(trial, 0);
 					other_trial->is_mislocated = !trial->is_mislocated;
 				}
 				
-				init_w_hist(&w_hist_by_stage[1]);
-				init_w_hist(&w_hist_by_stage[2]);
-				init_w_hist(&w_hist_by_stage[3]);
-				init_w_hist(&w_hist_by_stage[4]);
-				init_w_hist(&w_hist);
-				
-				swift_run_until_event(trial, event_state_changed, log_transition_to_history, w_hist_by_stage, 2, 1); // first labile stage started
+				swift_run_until_event(trial, event_state_changed, 2, 1); // first labile stage started
 				
 				do {
-					transfer_w_hist(&w_hist_by_stage[1], &w_hist);
-					init_w_hist(&w_hist_by_stage[1]);
-					init_w_hist(&w_hist_by_stage[2]);
-					swift_run_until_event(trial, event_saccade_cancelled_or_nonlabile_stage_started, log_transition_to_history, w_hist_by_stage, trial->canc+1);
+					transfer_w_hist(&trial->w_hist_by_stage.glob, &w_hist);
+					init_w_hist(&trial->w_hist_by_stage.glob);
+					init_w_hist(&trial->w_hist_by_stage.lab);
+					swift_run_until_event(trial, event_saccade_cancelled_or_nonlabile_stage_started, trial->canc+1);
 				} while(!check_state_changed(trial, 3, 1));
-				transfer_w_hist(&w_hist_by_stage[2], &w_hist);
+				transfer_w_hist(&trial->w_hist_by_stage.lab, &w_hist);
 
 				if(i < sequence->nfix) {
 					double x = sequence->fixations[i+1].fl;
@@ -749,35 +782,31 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 					mlp = 1.0 - exp(loglik_spat_cond(trial, sequence->fixations[i+1].fw, x) - ll_spat);
 				}
 
-				swift_run_until_event(trial, event_state_changed, log_transition_to_history, w_hist_by_stage, 4, 1); // saccade execution (4) started (1)
-				transfer_w_hist(&w_hist_by_stage[3], &w_hist);
+				swift_run_until_event(trial, event_state_changed, 4, 1); // saccade execution (4) started (1)
+				transfer_w_hist(&trial->w_hist_by_stage.nlab, &w_hist);
 
 				ll[k][i][2][j] = log(p_variation) + loglik_temp(&w_hist, sequence->fixations[i].tfix);
 				trial->t = t_fix_started + sequence->fixations[i].tfix;
-				swift_run_until_event(trial, event_state_changed, log_transition_to_history, w_hist_by_stage, 4, 0); // saccade execution (4) finished (0)
+				swift_run_until_event(trial, event_state_changed, 4, 0); // saccade execution (4) finished (0)
 				
 				if(i < sequence->nfix) {
-					ll[k][i][3][j] = log(p_variation) + loglik_temp(&w_hist_by_stage[4], sequence->fixations[i].tsac);
+					ll[k][i][3][j] = log(p_variation) + loglik_temp(&trial->w_hist_by_stage.sacc, sequence->fixations[i].tsac);
 				}
 				trial->t = t_fix_started + sequence->fixations[i].tfix + sequence->fixations[i].tsac;
 
 
 				if(i > 1) {
-					init_w_hist(&w_hist_by_stage[1]);
-					init_w_hist(&w_hist_by_stage[2]);
-					init_w_hist(&w_hist_by_stage[3]);
-					init_w_hist(&w_hist_by_stage[4]);
 					init_w_hist(&w_hist);
 					
-					swift_run_until_event(other_trial, event_state_changed, log_transition_to_history, w_hist_by_stage, 2, 1); // first labile stage started
+					swift_run_until_event(other_trial, event_state_changed, 2, 1); // first labile stage started
 					
 					do {
-						transfer_w_hist(&w_hist_by_stage[1], &w_hist);
-						init_w_hist(&w_hist_by_stage[1]);
-						init_w_hist(&w_hist_by_stage[2]);
-						swift_run_until_event(other_trial, event_saccade_cancelled_or_nonlabile_stage_started, log_transition_to_history, w_hist_by_stage, other_trial->canc+1);
+						transfer_w_hist(&other_trial->w_hist_by_stage.glob, &w_hist);
+						init_w_hist(&other_trial->w_hist_by_stage.glob);
+						init_w_hist(&other_trial->w_hist_by_stage.lab);
+						swift_run_until_event(other_trial, event_saccade_cancelled_or_nonlabile_stage_started, other_trial->canc+1);
 					} while(!check_state_changed(other_trial, 3, 1));
-					transfer_w_hist(&w_hist_by_stage[2], &w_hist);
+					transfer_w_hist(&other_trial->w_hist_by_stage.lab, &w_hist);
 
 					if(i < sequence->nfix) {
 						double x = sequence->fixations[i+1].fl;
@@ -785,14 +814,14 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 						ll[k][i][1][N+j] = log1p(-p_variation) + loglik_spat(other_trial, x);
 					}
 
-					swift_run_until_event(other_trial, event_state_changed, log_transition_to_history, w_hist_by_stage, 4, 1); // saccade execution (4) started (1)
-					transfer_w_hist(&w_hist_by_stage[3], &w_hist);
+					swift_run_until_event(other_trial, event_state_changed, 4, 1); // saccade execution (4) started (1)
+					transfer_w_hist(&other_trial->w_hist_by_stage.nlab, &w_hist);
 
 					ll[k][i][2][N+j] = log1p(-p_variation) + loglik_temp(&w_hist, sequence->fixations[i].tfix); 
-					swift_run_until_event(other_trial, event_state_changed, log_transition_to_history, w_hist_by_stage, 4, 0); // saccade execution (4) finished (0)
+					swift_run_until_event(other_trial, event_state_changed, 4, 0); // saccade execution (4) finished (0)
 					
 					if(i < sequence->nfix) {
-						ll[k][i][3][N+j] = log1p(-p_variation) + loglik_temp(&w_hist_by_stage[4], sequence->fixations[i].tsac);
+						ll[k][i][3][N+j] = log1p(-p_variation) + loglik_temp(&other_trial->w_hist_by_stage.sacc, sequence->fixations[i].tsac);
 					}
 
 					free_swift_trial(other_trial);
@@ -805,12 +834,7 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 
 
 			}
-			clear_w_hist(w_hist_by_stage[1]);
-			clear_w_hist(w_hist_by_stage[2]);
-			clear_w_hist(w_hist_by_stage[3]);
-			clear_w_hist(w_hist_by_stage[4]);
 			clear_w_hist(w_hist);
-			free_vector(w_hist, w_hist_by_stage);
 			free_swift_trial(trial);
 		}
 	}
@@ -860,11 +884,11 @@ void generate_swift_single(swift_model * model, int s, swift_trial * sequence, u
 			sequence->fixations = resize_vector(swift_fixation, sequence->fixations, ar_size, ar_size*2);
 			ar_size*=2;
 		}
-		swift_run_until_event(trial, event_state_changed, NULL, NULL, 4, 1); /* saccade started */
+		swift_run_until_event(trial, event_state_changed, 4, 1); /* saccade started */
 		sequence->fixations[Nfix].tfix = (int) (trial->t - t_fix_started);
 		t_fix_started = trial->t;
 		if(check_all_words_processed(trial) && Nfix >= 2) break;
-		swift_run_until_event(trial, event_state_changed, NULL, NULL, 4, 0); /* saccade ended */
+		swift_run_until_event(trial, event_state_changed, 4, 0); /* saccade ended */
 		sequence->fixations[Nfix+1].fw = trial->gaze_word;
 		if(trial->gaze_word > 1) sequence->fixations[Nfix+1].fl = trial->gaze_letter - trial->border[trial->gaze_word-1];
 		else sequence->fixations[Nfix+1].fl = trial->gaze_letter;
