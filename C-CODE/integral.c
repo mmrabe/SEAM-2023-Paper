@@ -595,6 +595,7 @@ void propagate_counters(swift_run * trial, double dt, int state) {
             }
             if(!already_encoded_in_memory) {
                 actr_add_memory_for(trial->actr.atrial, sentence_prop(trial->corpus, trial->s, actr_template.memory_item_count), sentence_prop(trial->corpus, trial->s, actr_template.memory_template), j, trial->t - trial->dt, 1);
+				log_event(trial, "encode %d", j);
             }
             actr_prepare_retrievals_for(trial->actr.atrial, sentence_prop(trial->corpus, trial->s, actr_template.retrieval_item_count), sentence_prop(trial->corpus, trial->s, actr_template.retrieval_template), j, trial->t - trial->dt);
             trial->actr.word_waits_for_retrieval[j] = 0;
@@ -602,6 +603,7 @@ void propagate_counters(swift_run * trial, double dt, int state) {
                 if(j == trial->actr.atrial->retrievals[i].trigger) trial->actr.word_waits_for_retrieval[j]++;
             }
             if(trial->actr.word_waits_for_retrieval[j]) {
+				log_event(trial, "s %d %d %d", state-4, trial->states[state], STATE_WAITFORRETRIEVAL);
                 trial->states[state] = STATE_WAITFORRETRIEVAL;
             }
 		}
@@ -614,6 +616,7 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 
 
         if( trial->states[state] == STATE_POSTRETRIEVAL && trial->n_count[state] <= 0) {
+			log_event(trial, "s %d %d %d", state-4, trial->states[state], STATE_COMPLETE);
             trial->states[state] = STATE_COMPLETE;
             trial->n_count[state] = 0;
         }
@@ -624,12 +627,15 @@ void propagate_counters(swift_run * trial, double dt, int state) {
                     word_processing_block_times[i] = current_retrieval_ends + (current_retrieval_ends - current_retrieval_started) * actr_mu2;
                 }*/
                 if(trial->states[i+4] == STATE_RETRIEVAL) {
+					log_event(trial, "s %d %d %d", i, trial->states[i+4], STATE_POSTLEXICAL);
                     trial->states[i+4] = STATE_POSTLEXICAL;
                     trial->actr.word_processing_block_times[i] = trial->t + trial->params->mu1;
                 } else if(trial->states[i+4] == STATE_TRIGGERRETRIEVAL) {
+					log_event(trial, "s %d %d %d", i, trial->states[i+4], STATE_POSTRETRIEVAL);
                     trial->states[i+4] = STATE_POSTRETRIEVAL;
                 }
             }
+            log_event(trial, "match %d %d", trial->actr.current_retrieval_id, j);
             trial->actr.retrieval_result.memory_trigger = j;
             trial->actr.retrieval_result.latency = trial->t - trial->actr.current_retrieval_started;
             actr_end_retrieval(trial->actr.atrial, trial->actr.retrieval_result);
@@ -650,9 +656,11 @@ void propagate_counters(swift_run * trial, double dt, int state) {
         trial->actr.current_retrieval_id = trial->actr.atrial->n_retrievals_complete + 1;
         trial->actr.current_retrieval = trial->actr.atrial->retrievals[trial->actr.current_retrieval_id];
         trial->actr.current_retrieval_trigger = trial->actr.current_retrieval.trigger;
+        log_event(trial, "retrieve %d %d", trial->actr.current_retrieval_id, trial->actr.current_retrieval_trigger);
         if(trial->states[4+trial->actr.current_retrieval_trigger] == STATE_WAITFORRETRIEVAL) {
             trial->actr.word_processing_block_times[trial->actr.current_retrieval_trigger] = INFINITY;
             trial->actr.R_count = fmax(1.0, trial->N_count[4+trial->actr.current_retrieval_trigger] * trial->params->rfrac);
+			log_event(trial, "s %d %d %d", trial->actr.current_retrieval_trigger, trial->states[trial->actr.current_retrieval_trigger+4], STATE_POSTRETRIEVAL);
             trial->states[4+trial->actr.current_retrieval_trigger] = STATE_RETRIEVAL;
             for(i=1;i<=trial->N;i++) {
                 trial->actr.retrieval_share[i] = -INFINITY;
