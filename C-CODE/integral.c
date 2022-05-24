@@ -113,6 +113,8 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 	ret->W = vector(double, N+4);
 	ret->handlers.transition_rates_calculated = NULL;
 	ret->handlers.state_selected = NULL;
+	ret->handlers.target_selected = NULL;
+	ret->handlers.saccade_executed = NULL;
 	ret->handlers.counters_propagated = NULL;
 	ret->w_hist_by_stage.glob.hist = NULL;
 	ret->w_hist_by_stage.lab.hist = NULL;
