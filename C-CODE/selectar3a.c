@@ -24,7 +24,7 @@ int selectar(double *aa,int *as,int k,int NW,double gamma,RANSEED_TYPE *seed, in
 
     // get index of leftmost unfinished word
     for (ik = 1; ik < NW; ik++) {
-        if (as[ik] < STATE_COMPLETE) break;
+        if (as[ik] < STATE_POSTRETRIEVAL) break;
     }
 
     //ik = k;
