@@ -380,7 +380,7 @@ SEXP swiftr_generate(SEXP arg1) {
 
   swift_dataset * d = malloc(sizeof(swift_dataset));
   d->name = NULL;
-  generate_swift_all(m, d);
+  generate_swift_all(m, d, NULL);
 
   SEXP ret = PROTECT(R_MakeExternalPtr(d, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(ret, swiftr_gcdata, (Rboolean) 1);
