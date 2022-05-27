@@ -79,21 +79,25 @@ struct swift_run {
 #define log_handler(trial, event, ...) ((trial)->handlers.event == NULL ? NULL : (trial)->handlers.event((trial) __VA_OPT__(,) __VA_ARGS__))
 
 #define log_event(trial, fmt, ...) \
-	_Pragma("omp critical(event_file)") \
 	if(trial->files.events != NULL) { \
-		fprintf(trial->files.events, "%d\t%.2lf\t", trial->s, trial->t); \
-		fprintf(trial->files.events, fmt __VA_OPT__(,) __VA_ARGS__); \
-		fputs("\n", trial->files.events); \
+		_Pragma("omp critical(event_file)") \
+		{ \
+			fprintf(trial->files.events, "%d\t%.2lf\t", trial->s, trial->t); \
+			fprintf(trial->files.events, fmt __VA_OPT__(,) __VA_ARGS__); \
+			fputs("\n", trial->files.events); \
+		} \
 	}
 
 void log_activation_to_file(swift_run * trial) {
-	#pragma omp critical(activation_history_file)
 	if(trial->files.activation_history != NULL) {
-		fprintf(trial->files.activation_history, "%d\t%.2lf", trial->s, trial->t);
-		for(int i = 1; i <= trial->N + 4; i++) {
-			fprintf(trial->files.activation_history, "\t%d", trial->n_count[i]);
+		#pragma omp critical(activation_history_file)
+		{
+			fprintf(trial->files.activation_history, "%d\t%.2lf\t", trial->s, trial->t);
+			for(int i = 1; i <= trial->N + 4; i++) {
+				fprintf(trial->files.activation_history, "%d ", trial->n_count[i]);
+			}
+			fputs("\n", trial->files.activation_history);
 		}
-		fputs("\n", trial->files.activation_history);
 	}
 }
 
