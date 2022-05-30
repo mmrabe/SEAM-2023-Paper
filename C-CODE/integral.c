@@ -572,7 +572,7 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 
 		if(trial->n_count[state] >= trial->N_count[state] && trial->states[state] == STATE_LEXICAL) {
 			trial->n_count[state] = trial->N_count[state];
-			log_event(trial, "s %d %d %d", state-4, trial->states[state], STATE_POSTLEXICAL);
+			log_event(trial, "s %d %d %d", j, trial->states[state], STATE_POSTLEXICAL);
 			trial->states[state] = STATE_POSTLEXICAL;
 
             int already_encoded_in_memory = 0, i;
@@ -592,29 +592,26 @@ void propagate_counters(swift_run * trial, double dt, int state) {
                 if(j == trial->actr.atrial->retrievals[i].trigger) trial->actr.word_waits_for_retrieval[j]++;
             }
             if(trial->actr.word_waits_for_retrieval[j]) {
-				log_event(trial, "s %d %d %d", state-4, trial->states[state], STATE_WAITFORRETRIEVAL);
+				log_event(trial, "s %d %d %d", j, trial->states[state], STATE_WAITFORRETRIEVAL);
                 trial->states[state] = STATE_WAITFORRETRIEVAL;
             }
 		}
 		
 		if(trial->n_count[state] <= 0 && trial->states[state] == STATE_POSTLEXICAL) {
 			trial->n_count[state] = 0;
-			log_event(trial, "s %d %d %d", state-4, trial->states[state], STATE_COMPLETE);
+			log_event(trial, "s %d %d %d", j, trial->states[state], STATE_COMPLETE);
 			trial->states[state] = STATE_COMPLETE;
 		}
 
 
         if( trial->states[state] == STATE_POSTRETRIEVAL && trial->n_count[state] <= 0) {
-			log_event(trial, "s %d %d %d", state-4, trial->states[state], STATE_COMPLETE);
+			log_event(trial, "s %d %d %d", j, trial->states[state], STATE_COMPLETE);
             trial->states[state] = STATE_COMPLETE;
             trial->n_count[state] = 0;
         }
 
         if( trial->states[state] == STATE_TRIGGERRETRIEVAL && trial->n_count[state] >= trial->actr.R_count) {
             for(i=1; i<=trial->N; i++) {
-                /*if(i == retrieval_result.memory_trigger) {
-                    word_processing_block_times[i] = current_retrieval_ends + (current_retrieval_ends - current_retrieval_started) * actr_mu2;
-                }*/
                 if(trial->states[i+4] == STATE_RETRIEVAL) {
 					log_event(trial, "s %d %d %d", i, trial->states[i+4], STATE_POSTLEXICAL);
                     trial->states[i+4] = STATE_POSTLEXICAL;
