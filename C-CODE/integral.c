@@ -653,7 +653,7 @@ void propagate_counters(swift_run * trial, double dt, int state) {
         log_event(trial, "retrieve %d %d", trial->actr.current_retrieval_id, trial->actr.current_retrieval_trigger);
         if(trial->states[4+trial->actr.current_retrieval_trigger] == STATE_WAITFORRETRIEVAL) {
             trial->actr.word_processing_block_times[trial->actr.current_retrieval_trigger] = INFINITY;
-            trial->actr.R_count = fmax(1.0, trial->N_count[4+trial->actr.current_retrieval_trigger] * trial->params->rfrac);
+            trial->actr.R_count = fmax(1.0, trial->params->aord * trial->params->rfrac);
 			log_event(trial, "s %d %d %d", trial->actr.current_retrieval_trigger, trial->states[trial->actr.current_retrieval_trigger+4], STATE_POSTRETRIEVAL);
             trial->states[4+trial->actr.current_retrieval_trigger] = STATE_RETRIEVAL;
             for(i=1;i<=trial->N;i++) {
