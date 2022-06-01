@@ -399,7 +399,7 @@ void transition_rates(swift_run * trial) {
         }
         for( i = 1; i <= trial->actr.atrial->n_items; i++ ) {
             int memory_trigger = all_results[1][i].memory_trigger;
-            if(memory_trigger && (trial->states[4+memory_trigger] == STATE_COMPLETE || trial->states[4+memory_trigger] == STATE_POSTRETRIEVAL) && memory_trigger != trial->actr.current_retrieval_trigger) {
+            if(memory_trigger && (trial->states[4+memory_trigger] != STATE_TRIGGERRETRIEVAL) && memory_trigger != trial->actr.current_retrieval_trigger) {
                 trial->actr.retrieval_share[memory_trigger] = all_results[1][i].noisy_activation;
                 trial->states[4+memory_trigger] = STATE_TRIGGERRETRIEVAL;
             }
