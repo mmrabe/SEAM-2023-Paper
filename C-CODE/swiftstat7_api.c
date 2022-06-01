@@ -435,7 +435,7 @@ int swift_version_string(char * str) {
 
 int swift_variant_string(char * str) {
     // base invparab d-dep mt-rand saccgauss
-    return sprintf(str, "%s lexrate:%s selectar:%s rangen:%s execsacc:%s", SWIFT_VARIANT, SWIFT_VARIANT_LEXRATE, SWIFT_VARIANT_SELECTAR, SWIFT_VARIANT_RANGEN, SWIFT_VARIANT_EXECSACC);
+    return sprintf(str, "%s [%s] lexrate:%s selectar:%s rangen:%s execsacc:%s", SWIFT_VARIANT, gitversion, SWIFT_VARIANT_LEXRATE, SWIFT_VARIANT_SELECTAR, SWIFT_VARIANT_RANGEN, SWIFT_VARIANT_EXECSACC);
 }
 
 int swift_api_version_string(char * str) {
