@@ -332,7 +332,7 @@ void processing_rate(swift_run * trial, double * procrate)
     
     /* adding decay if as[.]==2 */
     for ( j=1; j<=trial->N; j++ ) {
-        if ( trial->states[4+j] == STATE_POSTLEXICAL )  {
+        if ( trial->states[4+j] == STATE_POSTLEXICAL || trial->states[4+j] == STATE_POSTRETRIEVAL )  {
             procrate[j] *= trial->params->proc;
             if ( procrate[j]<trial->params->decay )  procrate[j] = trial->params->decay;
         }
