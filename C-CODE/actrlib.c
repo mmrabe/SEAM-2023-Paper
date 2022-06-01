@@ -521,7 +521,7 @@ typedef struct {
 	double match_penalty; // match penalty
 } actr_params;
 
-void actr_compute_base_level_activations(actr_params params, double moment, int * moments, int n_moments, int n_trials, int n_items, int ** history, double ** base_levels) {
+void actr_compute_base_level_activations(actr_params params, double moment, int * moments, int n_moments, int n_trials, int n_items, int ** history, int n_history, double ** base_levels) {
 	int i, j, k;
 
 	// time since last retrieval for each retrieval (converted from milliseconds) [actr.r, l. 29]
@@ -547,12 +547,17 @@ void actr_compute_base_level_activations(actr_params params, double moment, int 
 	for(i=1;i<=n_items;i++) {
 		// activations = (past == i) * decay
 		for(j=1;j<=n_trials;j++) {
-			for(k=1;k<=n_moments;k++) {
+			for(k=1;k<=n_history;k++) {
 				if(history[j][k] == i) activations[j][k] = decay[j][k];
 				else activations[j][k] = -INFINITY;
 			}
+			for(;k<=n_moments;k++) {
+				activations[j][k] = -INFINITY;
+			}
 		}
+	}
 
+	for(i=1;i<=n_items;i++) {
 		for(j=1;j<=n_trials;j++) {
 			base_levels[i][j] = logsumexp(activations[j], n_moments);
 			if(isinf(base_levels[i][j])) base_levels[i][j] = -INFINITY;
@@ -595,7 +600,7 @@ void actr_retrieve(actr_params params, int moment, actr_retrieval_item cues, act
 
 	// compute base level activations [actr.r, l. 62]
 
-	actr_compute_base_level_activations(params, moment, moments, n_moments, n_trials, n_items, history, base_levels);
+	actr_compute_base_level_activations(params, moment, moments, n_moments, n_trials, n_items, history, n_history, base_levels);
 
 	//printf_matrix(base_levels, n_items, n_trials, "%8.3lf");
 
@@ -905,10 +910,15 @@ void actr_free_trial_(actr_trial * trial) {
 }
 
 actr_trial * actr_duplicate_trial(actr_trial * src) {
+	int i;
 	actr_trial * ret = actr_new_trial(src->runs);
 	*ret = *src;
 	ret->items = duplicate_vector(actr_memory_item, src->items, ret->n_items);
 	ret->retrievals = duplicate_vector(actr_retrieval_item, src->retrievals, ret->n_retrievals);
+	for(i=1;i<=ret->n_retrievals;i++) {
+		ret->items[i].features = duplicate_vector(actr_feature, ret->items[i].features, actr_n_feature_types);
+		ret->retrievals[i].cues = duplicate_vector(actr_cue, ret->retrievals[i].cues, actr_n_feature_types);
+	}
 	ret->retrieval_results = duplicate_matrix(actr_retrieval_result, src->retrieval_results, ret->runs, ret->n_retrieval_results);
 	ret->history = duplicate_matrix(int, src->history, ret->runs, ret->n_history);
 	ret->moments = duplicate_vector(int, src->moments, ret->n_moments);
