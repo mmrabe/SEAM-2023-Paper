@@ -426,7 +426,7 @@ void transition_rates(swift_run * trial) {
 			}
         }
         else if(trial->states[4+i] == STATE_POSTRETRIEVAL) {
-            trial->W[4+i] = trial->actr.R_count/(1000.0*trial->params->F*exp(-trial->actr.retrieval_share[i]));
+            trial->W[4+i] = trial->procrate[i] * trial->params->alpha;
         }
 	    else trial->W[4+i] = trial->procrate[i] * trial->params->alpha;
 	}
