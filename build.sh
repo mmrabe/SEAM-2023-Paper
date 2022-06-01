@@ -66,6 +66,7 @@ echo "--- BEGIN GENERATE PARAMETER FILE ---" > $CCOUT
 # Generate parameter C code
 echo "// Note: This is a temporary file and will be overwritten when the $0 script is called." > $PARDEF_FILE
 echo "// It is recommended to edit $SWPAR_FILE instead, from which $PARDEF_FILE file is generated." >> $PARDEF_FILE
+echo "#define gitversion \"$(git rev-parse --abbrev-ref HEAD) @ commit $(git rev-parse HEAD)\"" >> $PARDEF_FILE
 $PYEXEC generate_pardef.py $SWPAR_FILE 2>>$CCOUT >> $PARDEF_FILE
 genpar=$?
 echo "--- END GENERATE PARAMETER FILE ---" >> $CCOUT
