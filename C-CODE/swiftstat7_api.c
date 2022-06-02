@@ -1100,21 +1100,23 @@ void swift_generate(swift_model* m, char* output_dir, char* seqname, int * items
     sprintf(file_ahist, "%s/ahist_%s.dat", output_dir, seqname);
 
     swift_output_files files;
-    files.fixation_sequence = fopen(file_fseq, "w");
-    files.activation_history = fopen(file_ahist, "w");
-    files.events = fopen(file_evts, "w");
+    files.fixation_sequence = m->params->output_fixseq ? fopen(file_fseq, "w") : NULL;
+    files.activation_history = m->params->output_ahist ? fopen(file_ahist, "w") : NULL;
+    files.events = m->params->output_events ? fopen(file_evts, "w") : NULL;
 
     swift_dataset data;
     data.name = NULL;
     generate_swift_some(m, items, n_items, &data, &files);
 
-    write_dataset(files.fixation_sequence, data);
+    if(files.fixation_sequence) {
+        write_dataset(files.fixation_sequence, data);
+    }
 
     clear_dataset(data);
 
-    fclose(files.fixation_sequence);
-    fclose(files.activation_history);
-    fclose(files.events);
+    if(files.fixation_sequence) fclose(files.fixation_sequence);
+    if(files.activation_history) fclose(files.activation_history);
+    if(files.events) fclose(files.events);
 
 }
 
