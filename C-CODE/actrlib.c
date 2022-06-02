@@ -529,43 +529,22 @@ void actr_compute_base_level_activations(actr_params params, double moment, int 
 	for(i=1;i<=n_moments;i++) {
 		tj[i] = (moment - moments[i]) / 1000.0;
 	}
-
-	// the decay function tj^-d [act.r, l. 37]
-	double ** decay = matrix(double, n_trials, n_moments);
-	for(i=1;i<=n_trials;i++) {
-		for(j=1;j<=n_moments;j++) {
-			if(tj[j] > 0.0 /* is past event? */) {
-				decay[i][j] = -params.d * log(tj[j]);
-			} else {
-				decay[i][j] = -INFINITY;
-			}
-		}
-	}
-	double ** activations = matrix(double, n_trials, n_moments);
-
+	
 	// compute base level activation for each item (for each trial) [actr.r, l. 40]
-	for(i=1;i<=n_items;i++) {
-		// activations = (past == i) * decay
-		for(j=1;j<=n_trials;j++) {
+
+	double * item_decay = vector(double, n_history);
+
+	for(j=1;j<=n_trials;j++) {
+		for(i=1;i<=n_items;i++) {
 			for(k=1;k<=n_history;k++) {
-				if(history[j][k] == i) activations[j][k] = decay[j][k];
-				else activations[j][k] = -INFINITY;
+				if(history[j][k] == i && tj[k] > 0.0) item_decay[k] = -params.d * log(tj[k]);
+				else item_decay[k] = -INFINITY;
 			}
-			for(;k<=n_moments;k++) {
-				activations[j][k] = -INFINITY;
-			}
+			base_levels[i][j] = logsumexp(item_decay, n_history);
 		}
 	}
 
-	for(i=1;i<=n_items;i++) {
-		for(j=1;j<=n_trials;j++) {
-			base_levels[i][j] = logsumexp(activations[j], n_moments);
-			if(isinf(base_levels[i][j])) base_levels[i][j] = -INFINITY;
-		}
-	}
-
-	free_matrix(double, activations);
-	free_matrix(double, decay);
+	free_vector(double, item_decay);
 	free_vector(double, tj);
 }
 
