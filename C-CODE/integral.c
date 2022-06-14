@@ -218,7 +218,6 @@ swift_run * clone_swift_trial(swift_run * src, unsigned int seed) {
 	ret->view = duplicate_vector(double, src->view, src->N);
 	ret->border = duplicate_vector(double, src->border, src->N);
 	ret->len = duplicate_vector(int, src->len, src->N);
-	ret->aa = duplicate_vector(double, src->aa, src->N);
 	ret->procrate = duplicate_vector(double, src->procrate, src->N);
 	if(seed) {
 		initSeed(seed, &ret->seed);
