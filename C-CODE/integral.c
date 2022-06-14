@@ -304,15 +304,16 @@ void counter_base_rates(swift_run * trial, double * W) {
 	int i;
 
 	/* compute inhibition */
+	ifovea = 0.0;
 	if(trial->states[trial->gaze_word] == STATE_LEXICAL) {
     	ifovea = trial->aa[trial->gaze_word];
-	} else {
+	} else if(trial->states[trial->gaze_word] == STATE_POSTLEXICAL) {
     	ifovea = (double) trial->N_count[trial->gaze_word+4] / trial->params->aord;
 	}
     for(i=trial->gaze_word+1, iparafovea = 0.0; i <= trial->N; i++)  {
 		if(trial->states[i] == STATE_LEXICAL) {
         	iparafovea += trial->aa[i];
-        } else {
+        } else if(trial->states[i] == STATE_POSTLEXICAL) {
         	iparafovea += (double) trial->N_count[i+4] / trial->params->aord;
         }
     }
