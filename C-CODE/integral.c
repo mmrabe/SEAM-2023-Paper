@@ -588,7 +588,7 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 	double **** ll = vector(double***, n);
 
 	for(i = 1; i <= n; i++) {
-		ll[i] = (double***) array(double, 3, nfixations(dataset, trials == NULL ? i : trials[i]), 3, 2*N);
+		ll[i] = (double***) array(double, 3, nfixations(dataset, trials == NULL ? i : trials[i]), 3, N);
 	}
 
 	unsigned int * seeds = vector(unsigned int, n*N);
@@ -607,7 +607,6 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 			swift_run * trial = new_swift_trial(model, sequence->sentence, seeds[j+(k-1)*N]);
 			// set an event handler for when a new state is selected -> save to transition log within trial (trial->w_hist_by_stage)
 			trial->handlers.state_selected = log_transition_to_history;
-			swift_run * other_trial;
 
 			W_hist w_hist;
 			w_hist.hist = NULL;
@@ -626,18 +625,11 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 				trial->is_mislocated = i > 1 && trial->saccade_target != trial->gaze_word;
 				trial->is_refixation = i > 1 && sequence->fixations[i-1].fw == trial->gaze_word;
 
-				p_variation = trial->is_mislocated ? mlp : 1.0 - mlp;
-
 				init_w_hist(&trial->w_hist_by_stage.glob);
 				init_w_hist(&trial->w_hist_by_stage.lab);
 				init_w_hist(&trial->w_hist_by_stage.nlab);
 				init_w_hist(&trial->w_hist_by_stage.sacc);
 				init_w_hist(&w_hist);
-
-				if(i > 1) {
-					other_trial = clone_swift_trial(trial, 0);
-					other_trial->is_mislocated = !trial->is_mislocated;
-				}
 				
 				swift_run_until_event(trial, event_state_changed, 2, 1); // first labile stage started
 				
@@ -653,58 +645,21 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 					double x = sequence->fixations[i+1].fl;
 					if(sequence->fixations[i+1].fw > 1) x += trial->border[sequence->fixations[i+1].fw-1];
 					double ll_spat = loglik_spat(trial, x);
-					ll[k][i][1][j] = log(p_variation) + ll_spat;
+					ll[k][i][1][j] = ll_spat;
 					mlp = 1.0 - exp(loglik_spat_cond(trial, sequence->fixations[i+1].fw, x) - ll_spat);
 				}
 
 				swift_run_until_event(trial, event_state_changed, 4, 1); // saccade execution (4) started (1)
 				transfer_w_hist(&trial->w_hist_by_stage.nlab, &w_hist);
 
-				ll[k][i][2][j] = log(p_variation) + loglik_temp(&w_hist, sequence->fixations[i].tfix);
+				ll[k][i][2][j] = loglik_temp(&w_hist, sequence->fixations[i].tfix);
 				trial->t = t_fix_started + sequence->fixations[i].tfix;
 				swift_run_until_event(trial, event_state_changed, 4, 0); // saccade execution (4) finished (0)
 				
 				if(i < sequence->nfix) {
-					ll[k][i][3][j] = log(p_variation) + loglik_temp(&trial->w_hist_by_stage.sacc, sequence->fixations[i].tsac);
+					ll[k][i][3][j] = loglik_temp(&trial->w_hist_by_stage.sacc, sequence->fixations[i].tsac);
 				}
 				trial->t = t_fix_started + sequence->fixations[i].tfix + sequence->fixations[i].tsac;
-
-
-				if(i > 1) {
-					init_w_hist(&w_hist);
-					
-					swift_run_until_event(other_trial, event_state_changed, 2, 1); // first labile stage started
-					
-					do {
-						transfer_w_hist(&other_trial->w_hist_by_stage.glob, &w_hist);
-						init_w_hist(&other_trial->w_hist_by_stage.glob);
-						init_w_hist(&other_trial->w_hist_by_stage.lab);
-						swift_run_until_event(other_trial, event_saccade_cancelled_or_nonlabile_stage_started, other_trial->canc+1);
-					} while(!check_state_changed(other_trial, 3, 1));
-					transfer_w_hist(&other_trial->w_hist_by_stage.lab, &w_hist);
-
-					if(i < sequence->nfix) {
-						double x = sequence->fixations[i+1].fl;
-						if(sequence->fixations[i+1].fw > 1) x += other_trial->border[sequence->fixations[i+1].fw-1];
-						ll[k][i][1][N+j] = log1p(-p_variation) + loglik_spat(other_trial, x);
-					}
-
-					swift_run_until_event(other_trial, event_state_changed, 4, 1); // saccade execution (4) started (1)
-					transfer_w_hist(&other_trial->w_hist_by_stage.nlab, &w_hist);
-
-					ll[k][i][2][N+j] = log1p(-p_variation) + loglik_temp(&w_hist, sequence->fixations[i].tfix); 
-					swift_run_until_event(other_trial, event_state_changed, 4, 0); // saccade execution (4) finished (0)
-					
-					if(i < sequence->nfix) {
-						ll[k][i][3][N+j] = log1p(-p_variation) + loglik_temp(&other_trial->w_hist_by_stage.sacc, sequence->fixations[i].tsac);
-					}
-
-					free_swift_trial(other_trial);
-				} else {
-					ll[k][i][1][N+j] = -INFINITY;
-					ll[k][i][2][N+j] = -INFINITY;
-					ll[k][i][3][N+j] = -INFINITY;
-				}
 
 
 			}
@@ -722,11 +677,11 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 		swift_trial * sequence = &dataset->trials[trials == NULL ? k : trials[k]];
 		for(i = 1; i <= sequence->nfix; i++) {
 			#pragma omp atomic update
-			likelihood->fixation_location += logsumexp(ll[k][i][1], 2*N) - log(N);
+			likelihood->fixation_location += logsumexp(ll[k][i][1], N) - log(N);
 			#pragma omp atomic update
-			likelihood->fixation_duration += logsumexp(ll[k][i][2], 2*N) - log(N);
+			likelihood->fixation_duration += logsumexp(ll[k][i][2], N) - log(N);
 			#pragma omp atomic update
-			likelihood->saccade_duration += logsumexp(ll[k][i][3], 2*N) - log(N);
+			likelihood->saccade_duration += logsumexp(ll[k][i][3], N) - log(N);
 		}
 		free_array(double, ll[k], 3);
 	}
