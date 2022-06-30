@@ -333,11 +333,19 @@ void counter_base_rates(swift_run * trial, double * W) {
 
 	kapparate = 1.0/(1.0 + trial->params->kappa0 * exp(-trial->params->kappa1*trial->dist*trial->dist));
 
+	double labrate = 1.0;
+	if(trial->is_fitting) {
+		double mlp = 1.0 - trial->ptar[trial->gaze_word];
+		if(trial->is_refixation) labrate = mlp * trial->params->misfac + (1.0 - mlp) * trial->params->refix;
+		else labrate = mlp * trial->params->misfac + (1.0 - mlp);
+	} else {
+		if(trial->is_mislocated) labrate = trial->params->misfac;
+		else if(trial->is_refixation) labrate = trial->params->refix;
+	}
+
 	W[1] = trial->N_count[1] / (trial->params->msac*100.0) * inhibrate;                          /* rate of random walk for timer */
-	W[2] = trial->N_count[2] / (trial->params->tau_l*100.0);                  /* rate of random walk for labile sacprog stage */
-	if(trial->is_mislocated) W[2] *= trial->params->misfac;
-	else if(trial->is_refixation) W[2] *= trial->params->refix;
-	W[3] = trial->N_count[3] / (trial->params->tau_n*100.0) *kapparate;        /* ... nonlabile stage */
+	W[2] = trial->N_count[2] / (trial->params->tau_l*100.0) * labrate;                  /* rate of random walk for labile sacprog stage */
+	W[3] = trial->N_count[3] / (trial->params->tau_n*100.0) * kapparate;        /* ... nonlabile stage */
 	W[4] = trial->N_count[4] / (trial->params->tau_ex*100.0);                 /* ... saccade execution */
 
 }
@@ -622,10 +630,10 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 			swift_trial * sequence = &dataset->trials[trials == NULL ? k : trials[k]];
 			double t_fix_started, t_sac_started;
 			double p_variation;
-			double mlp = 0.0;
 
 			swift_run * trial = new_swift_trial(model, sequence->sentence, seeds[j+(k-1)*N]);
 			trial->is_fitting = 1;
+			trial->ptar[sequence->fixations[1].fw] = 1.0;
 			// set an event handler for when a new state is selected -> save to transition log within trial (trial->w_hist_by_stage)
 			trial->handlers.state_selected = log_transition_to_history;
 
@@ -666,7 +674,6 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 					if(sequence->fixations[i+1].fw > 1) x += trial->border[sequence->fixations[i+1].fw-1];
 					double ll_spat = loglik_spat(trial, x);
 					ll[k][i][1][j] = ll_spat;
-					mlp = 1.0 - exp(loglik_spat_cond(trial, sequence->fixations[i+1].fw, x) - ll_spat);
 				}
 
 				swift_run_until_event(trial, event_state_changed, 4, 1); // saccade execution (4) started (1)
