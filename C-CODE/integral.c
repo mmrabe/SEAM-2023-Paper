@@ -24,6 +24,7 @@ struct swift_run {
 	int * N_count;
 	int * states;
 	int N;
+	int is_fitting;
 	double t;
 	int gaze_word;
 	double gaze_letter;
@@ -178,6 +179,7 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 	ret->gaze_word = 1;
 	ret->gaze_letter = 1.0 + 0.5 * word_prop(model->corpus, s, 1, nl);
 	ret->N = N;
+	ret->is_fitting = 0;
 	double logf, lex;
 	for(i = 1; i <= N; i++) {
 		ret->states[4+i] = STATE_LEXICAL;
@@ -298,18 +300,36 @@ void processing_rate(swift_run * trial, double * procrate)
 
 #undef sq
 
-void counter_base_rates(swift_run * trial, double * W) {
-	double ifovea, iparafovea, inhib, inhibrate, kapparate;
+double compute_inhibition_rate(swift_run * trial, int word) {
+	double ifovea, iparafovea, inhib;
 	int i;
 
 	/* compute inhibition */
-    ifovea = trial->aa[trial->gaze_word];
-    for(i=trial->gaze_word+1, iparafovea = 0.0; i <= trial->N; i++)  {
+    ifovea = trial->aa[word];
+    for(i=word+1, iparafovea = 0.0; i <= trial->N; i++)  {
         iparafovea += trial->aa[i];
     }
     inhib = trial->params->h*ifovea + trial->params->h1*iparafovea;
     if ( inhib<0.0 )  inhib = 0.0;
-	inhibrate = 1.0/(1.0+inhib);
+
+	return 1.0/(1.0+inhib);
+}
+
+double compute_weighted_inhibition_rate(swift_run * trial) {
+	double sum = 0.0;
+	int i;
+	for(i = 1; i <= trial->N; i++) {
+		sum += compute_inhibition_rate(trial, i) * trial->ptar[i];
+	}
+	return sum;
+}
+
+void counter_base_rates(swift_run * trial, double * W) {
+	double inhibrate;
+	double kapparate;
+
+	/* compute inhibition */
+	inhibrate = trial->is_fitting ? compute_weighted_inhibition_rate(trial) : compute_inhibition_rate(trial, trial->gaze_word);
 
 	kapparate = 1.0/(1.0 + trial->params->kappa0 * exp(-trial->params->kappa1*trial->dist*trial->dist));
 
@@ -600,11 +620,12 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 	for(k = 1; k <= n; k++) {
 		for(j = 1; j <= N; j++) {
 			swift_trial * sequence = &dataset->trials[trials == NULL ? k : trials[k]];
-			double t_fix_started;
+			double t_fix_started, t_sac_started;
 			double p_variation;
 			double mlp = 0.0;
 
 			swift_run * trial = new_swift_trial(model, sequence->sentence, seeds[j+(k-1)*N]);
+			trial->is_fitting = 1;
 			// set an event handler for when a new state is selected -> save to transition log within trial (trial->w_hist_by_stage)
 			trial->handlers.state_selected = log_transition_to_history;
 
@@ -614,14 +635,13 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 			for(i = 1; i <= sequence->nfix; i++) {
 
 				t_fix_started = trial->t;
+
 				trial->gaze_letter = sequence->fixations[i].fl;
 				if(sequence->fixations[i].fw > 1) {
 					trial->gaze_letter += trial->border[sequence->fixations[i].fw-1];
 				}
 				trial->gaze_word = sequence->fixations[i].fw;
 
-
-				//trial->is_mislocated = i > 1 && ran1(&trial->seed) < mlp;
 				trial->is_mislocated = i > 1 && trial->saccade_target != trial->gaze_word;
 				trial->is_refixation = i > 1 && sequence->fixations[i-1].fw == trial->gaze_word;
 
@@ -652,14 +672,16 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 				swift_run_until_event(trial, event_state_changed, 4, 1); // saccade execution (4) started (1)
 				transfer_w_hist(&trial->w_hist_by_stage.nlab, &w_hist);
 
+				t_sac_started = trial->t;
+
 				ll[k][i][2][j] = loglik_temp(&w_hist, sequence->fixations[i].tfix);
-				trial->t = t_fix_started + sequence->fixations[i].tfix;
+				//trial->t = t_fix_started + sequence->fixations[i].tfix;
 				swift_run_until_event(trial, event_state_changed, 4, 0); // saccade execution (4) finished (0)
 				
 				if(i < sequence->nfix) {
 					ll[k][i][3][j] = loglik_temp(&trial->w_hist_by_stage.sacc, sequence->fixations[i].tsac);
 				}
-				trial->t = t_fix_started + sequence->fixations[i].tfix + sequence->fixations[i].tsac;
+				//trial->t = t_fix_started + sequence->fixations[i].tfix + sequence->fixations[i].tsac;
 
 
 			}
