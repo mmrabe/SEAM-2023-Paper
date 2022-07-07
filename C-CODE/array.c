@@ -38,6 +38,7 @@ void check_array_memory();
 
 
 
+#define array_dims(type, array, ndim) ar_dims(sizeof(type), array, ndim)
 #define copy_array(type, src, dest, ndim, ...) sw_array_copy(sizeof(type), src, dest, ndim, __VA_ARGS__)
 #define duplicate_array(type, src, ndim, ...) (src == NULL ? NULL : copy_array(type, src, array(type, ndim, __VA_ARGS__), ndim, __VA_ARGS__))
 
@@ -52,6 +53,8 @@ void check_array_memory();
 #define free_dmatrix(array, ...) free_matrix(double, (void*) array)
 #define free_imatrix(array, ...) free_matrix(int, (void*) array)
 #define resize_matrix(type, mat, old_rows, new_rows, old_cols, new_cols) ((type**) resize_array(type, mat, 2, old_rows, old_cols, new_rows, new_cols))
+#define matrix_rows(type, array) array_dims(type, array, 2)[0]
+#define matrix_cols(type, array) array_dims(type, array, 2)[1]
 
 // Some special cases for vectors
 
@@ -64,6 +67,7 @@ void check_array_memory();
 #define free_dvector(array, ...) free_vector(double, (void*) array)
 #define ivector(d, len) vector(int, len)
 #define free_ivector(array, ...) free_vector(int, (void*) array)
+#define vector_length(type, array) array_dims(type, array, 1)[0]
 
 // Output macros for matrices and vectors
 
@@ -95,6 +99,10 @@ void check_array_memory();
 
 // Method declarations
 
+int* ar_dims(size_t esize, void * array, int ndim) {
+	return (int*)((size_t) array - (1 + ndim) * sizeof(int) + (ndim == 1 ? esize : sizeof(void*)));
+}
+
 static void* ar_sw_array(size_t esize, int ndim, int dims[]) {
 
 	int i,j,k;
@@ -118,22 +126,25 @@ static void* ar_sw_array(size_t esize, int ndim, int dims[]) {
 
 	size_t addr_block_size = sizeof(void*) * (cum_n[0]);
 	size_t data_block_size = esize * n;
+	size_t dim_block_size = sizeof(int) * (ndim + 1);
 
-	size_t block_size = addr_block_size + data_block_size;
+	size_t block_size = dim_block_size + addr_block_size + data_block_size;
 
 	void ** data;
-	#pragma omp critical(malloc_safe)
-	{
-		data = (void**) malloc(block_size);
-	}
-
-	// initialize array values to 0, address block is set in loop below
-	memset((void*) ((size_t) data + addr_block_size), 0, data_block_size); 
+	data = (void**) malloc(block_size);
 
 	if(data == NULL) {
 		warn("Could not allocate %d-dimensional array with %lu elements and %lu bytes.", ndim, n, block_size);
 		return NULL;
 	}
+
+	memcpy(data, dims, sizeof(int) * ndim);
+	*((int*) ((size_t) data + dim_block_size - sizeof(int))) = ndim;
+
+	data = (void**) ((size_t) data + dim_block_size);
+
+	// initialize array values to 0, address block is set in loop below
+	memset((void*) ((size_t) data + addr_block_size), 0, data_block_size); 
 
 	size_t o1 = 0, o2, l =1;
 	for(i=0;i<ndim-1;i++) {
@@ -163,11 +174,9 @@ static void* ar_sw_array(size_t esize, int ndim, int dims[]) {
 
 void free_sw_array(size_t esize, void* array, int ndim) {
 	if(ndim > 1) {
-		#pragma omp critical(malloc_safe)
-		free((void*)((size_t) array + sizeof(void*)));
+		free((void*)((size_t) array + sizeof(void*) - (ndim + 1) * sizeof(int)));
 	} else {
-		#pragma omp critical(malloc_safe)
-		free((void*)((size_t) array + esize));
+		free((void*)((size_t) array + esize - (ndim + 1) * sizeof(int)));
 	}
 }
 

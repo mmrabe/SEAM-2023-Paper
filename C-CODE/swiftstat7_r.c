@@ -113,7 +113,7 @@ SEXP swiftr_evalmpilb() {
 #endif
 
 void swiftr_gcmodel(SEXP model) {
-  free_swift_model((swift_model*) EXTPTR_PTR(model));
+  free_swift_model((swift_model*) R_ExternalPtrAddr(model));
 }
 
 SEXP swiftr_loadmodel(SEXP arg1, SEXP arg2, SEXP arg3, SEXP arg4) {
@@ -141,7 +141,7 @@ SEXP swiftr_loadmodel(SEXP arg1, SEXP arg2, SEXP arg3, SEXP arg4) {
 }
 
 void swiftr_gcdata(SEXP data) {
-  free_swift_dataset((swift_dataset*) EXTPTR_PTR(data));
+  free_swift_dataset((swift_dataset*) R_ExternalPtrAddr(data));
 }
 
 SEXP swiftr_loaddata(SEXP arg1) {
@@ -171,7 +171,7 @@ SEXP swiftr_params() {
 }
 
 SEXP swiftr_update(SEXP arg1, SEXP arg2, SEXP arg3) {
-  swift_model * m = (swift_model*) EXTPTR_PTR(arg1);
+  swift_model * m = (swift_model*) R_ExternalPtrAddr(arg1);
   char* param_name = CHAR(STRING_ELT(AS_CHARACTER(arg2), 0));
   int param_id = swift_find_param(param_name);
   if(param_id == -1) {
@@ -273,7 +273,7 @@ int dataset2sexp(swift_dataset * seqs, SEXP * l) {
 }
 
 SEXP swiftr_data2df(SEXP arg1) {
-  swift_dataset * d = (swift_dataset*) EXTPTR_PTR(arg1);
+  swift_dataset * d = (swift_dataset*) R_ExternalPtrAddr(arg1);
   SEXP ret;
   int n;
   n = dataset2sexp(d, &ret);
@@ -282,7 +282,7 @@ SEXP swiftr_data2df(SEXP arg1) {
 }
 
 SEXP swiftr_getparam(SEXP arg1, SEXP arg2) {
-  swift_model * m = (swift_model*) EXTPTR_PTR(arg1);
+  swift_model * m = (swift_model*) R_ExternalPtrAddr(arg1);
   const char* param_name = CHAR(STRING_ELT(AS_CHARACTER(arg2), 0));
   int param_id = swift_find_param(param_name);
   if(param_id == -1) {
@@ -331,8 +331,8 @@ SEXP swiftr_version() {
 }
 
 SEXP swiftr_eval(SEXP arg1, SEXP arg2, SEXP arg3) {
-  swift_model * m = (swift_model*) EXTPTR_PTR(arg1);
-  swift_dataset * d = (swift_dataset*) EXTPTR_PTR(arg2);
+  swift_model * m = (swift_model*) R_ExternalPtrAddr(arg1);
+  swift_dataset * d = (swift_dataset*) R_ExternalPtrAddr(arg2);
 
   const int threads = INTEGER(AS_INTEGER(arg3))[0];
 
@@ -356,7 +356,7 @@ SEXP swiftr_eval(SEXP arg1, SEXP arg2, SEXP arg3) {
 
 
 SEXP swiftr_generatefile(SEXP arg1, SEXP arg2, SEXP arg3, SEXP arg4) {
-  swift_model * m = (swift_model*) EXTPTR_PTR(arg1);
+  swift_model * m = (swift_model*) R_ExternalPtrAddr(arg1);
   const char* seq_name = CHAR(STRING_ELT(AS_CHARACTER(arg2), 0));
   const char* dir_name = CHAR(STRING_ELT(AS_CHARACTER(arg3), 0));
 
@@ -376,7 +376,7 @@ SEXP swiftr_generatefile(SEXP arg1, SEXP arg2, SEXP arg3, SEXP arg4) {
 
 
 SEXP swiftr_generate(SEXP arg1) {
-  swift_model * m = (swift_model*) EXTPTR_PTR(arg1);
+  swift_model * m = (swift_model*) R_ExternalPtrAddr(arg1);
 
   swift_dataset * d = malloc(sizeof(swift_dataset));
   d->name = NULL;
