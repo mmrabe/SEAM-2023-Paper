@@ -126,9 +126,9 @@ double execsacc(swift_parameters * params, double *kpos,int *k,int *next_tar,dou
     double relative_position;
 
     if(*k == 1) {
-        relative_position = *kpos / (1.0 + len[1]);
+        relative_position = *kpos / (params->iws + len[1]);
     } else {
-        relative_position = (*kpos - border[*k - 1]) / (1.0 + len[*k]);
+        relative_position = (*kpos - border[*k - 1]) / (params->iws + len[*k]);
     }
     if(relative_position < 0.0) {
         relative_position = 0.0;
