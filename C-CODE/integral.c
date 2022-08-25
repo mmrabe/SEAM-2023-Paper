@@ -29,8 +29,11 @@ struct swift_run {
 	int * N_count;
 	int * states;
 	int N;
+	int is_fitting;
 	double t;
 	int gaze_word;
+	int prev_gaze_word;
+	int fix_saccade_target;
 	double gaze_letter;
 	swift_corpus * corpus;
 	swift_parameters * params;
@@ -74,6 +77,42 @@ struct swift_run {
 	} handlers;
 	swift_output_files files;
 };
+
+double sum(double * summands, int N) {
+	int i;
+	double sum = 0.0;
+	for(i = 1; i <= N; i++) sum += summands[i];
+	return sum;
+}
+
+int sample_boolean(double threshold, RANSEED_TYPE * seed) {
+	return ran1(seed) < threshold;
+}
+
+int linear_sample_normalized(double * weights, double sum, int N, RANSEED_TYPE * seed) {
+	int i = 1;
+	double test = 0.0;
+	double cutoff = ran1(seed) * sum;
+	while((test += weights[i]) < cutoff && i < N) i++;
+	return i;
+}
+
+int log_linear_sample_normalized(double * weights, double log_sum, int N, RANSEED_TYPE * seed) {
+	int i = 1;
+	double test = -INFINITY;
+	double cutoff = log(ran1(seed)) + log_sum;
+	while((test = logaddexp(test, weights[i])) < cutoff && i < N) i++;
+	return i;
+}
+
+int linear_sample(double * weights, int N, RANSEED_TYPE * seed) {
+	return linear_sample_normalized(weights, sum(weights, N), N, seed);
+}
+
+int log_linear_sample(double * weights, int N, RANSEED_TYPE * seed) {
+	return log_linear_sample_normalized(weights, logsumexp(weights, N), N, seed);
+}
+
 
 
 #define log_handler(trial, event, ...) ((trial)->handlers.event == NULL ? NULL : (trial)->handlers.event((trial) __VA_OPT__(,) __VA_ARGS__))
@@ -199,6 +238,7 @@ swift_run * new_swift_trial(swift_model * model, int s, unsigned int seed) {
 	ret->gaze_word = 1;
 	ret->gaze_letter = 1.0 + 0.5 * word_prop(model->corpus, s, 1, nl);
 	ret->N = N;
+	ret->is_fitting = 0;
 	double logf, lex;
 	for(i = 1; i <= N; i++) {
 		ret->states[4+i] = STATE_LEXICAL;
@@ -341,35 +381,41 @@ void processing_rate(swift_run * trial, double * procrate)
 
 #undef sq
 
-void counter_base_rates(swift_run * trial, double * W) {
-	double ifovea, iparafovea, inhib, inhibrate, kapparate;
+double compute_inhibition_rate(swift_run * trial, int word) {
+	double ifovea, iparafovea, inhib;
 	int i;
 
 	/* compute inhibition */
-	ifovea = 0.0;
-	if(trial->states[trial->gaze_word+4] == STATE_LEXICAL) {
-    	ifovea = trial->aa[trial->gaze_word];
-	} else if(trial->states[trial->gaze_word+4] == STATE_POSTLEXICAL || trial->states[trial->gaze_word+4] == STATE_RETRIEVAL || trial->states[trial->gaze_word+4] == STATE_WAITFORRETRIEVAL) {
-    	ifovea = (double) trial->N_count[trial->gaze_word+4] / trial->params->aord;
-	}
-    for(i=trial->gaze_word+1, iparafovea = 0.0; i <= trial->N; i++)  {
-		if(trial->states[i+4] == STATE_LEXICAL) {
-        	iparafovea += trial->aa[i];
-        } else if(trial->states[i+4] == STATE_POSTLEXICAL || trial->states[trial->gaze_word+4] == STATE_RETRIEVAL || trial->states[trial->gaze_word+4] == STATE_WAITFORRETRIEVAL) {
-        	iparafovea += (double) trial->N_count[i+4] / trial->params->aord;
-        }
+    ifovea = trial->aa[word];
+    for(i=word+1, iparafovea = 0.0; i <= trial->N; i++)  {
+        iparafovea += trial->aa[i];
     }
     inhib = trial->params->h*ifovea + trial->params->h1*iparafovea;
     if ( inhib<0.0 )  inhib = 0.0;
-	inhibrate = 1.0/(1.0+inhib);
+
+	return 1.0/(1.0+inhib);
+}
+
+
+void counter_base_rates(swift_run * trial, double * W) {
+	double inhibrate;
+	double kapparate;
+
+	/* compute inhibition */
+	inhibrate = compute_inhibition_rate(trial, trial->gaze_word);
 
 	kapparate = 1.0/(1.0 + trial->params->kappa0 * exp(-trial->params->kappa1*trial->dist*trial->dist));
 
+	double labrate = 1.0;
+	if(trial->is_mislocated) {
+		labrate = trial->params->misfac;
+	} else if(trial->is_refixation) {
+		labrate = trial->params->refix;
+	}
+
 	W[1] = trial->N_count[1] / (trial->params->msac*100.0) * inhibrate;                          /* rate of random walk for timer */
-	W[2] = trial->N_count[2] / (trial->params->tau_l*100.0);                  /* rate of random walk for labile sacprog stage */
-	if(trial->is_mislocated) W[2] *= trial->params->misfac;
-	else if(trial->is_refixation) W[2] *= trial->params->refix;
-	W[3] = trial->N_count[3] / (trial->params->tau_n*100.0) *kapparate;        /* ... nonlabile stage */
+	W[2] = trial->N_count[2] / (trial->params->tau_l*100.0) * labrate;                  /* rate of random walk for labile sacprog stage */
+	W[3] = trial->N_count[3] / (trial->params->tau_n*100.0) * kapparate;        /* ... nonlabile stage */
 	W[4] = trial->N_count[4] / (trial->params->tau_ex*100.0);                 /* ... saccade execution */
 
 }
@@ -441,38 +487,25 @@ void select_state(swift_run * trial, double * dt, int * state) {
 		Wsum += trial->W[i];
 	}
 
-	double test = ran1(&trial->seed) * Wsum;
-	for(i = 1; i <= 4+trial->N; i++) {
-		if(test < trial->W[i]) break;
-		else test -= trial->W[i];
-	}
-
-
+	*state = linear_sample_normalized(trial->W, Wsum, trial->N+4, &trial->seed);
 	*dt = rexp(Wsum, &trial->seed);
-	*state = i;
 }
 
 void select_target(swift_run * trial) {
 	selectar(trial->aa,&trial->states[4],trial->gaze_word,trial->N,trial->params->gamma,&trial->seed,1,trial->params->minact,trial->ptar);
-	int i;
-	double test = ran1(&trial->seed);
-	for(i = 1; i <= trial->N; i++) {
-		if(test < trial->ptar[i]) break;
-		else test -= trial->ptar[i];
-	}
-	trial->saccade_target = i;
-	trial->dist = fabs( trial->view[i] - trial->gaze_letter );
-	log_handler(trial, target_selected, i);
+
+	trial->saccade_target = linear_sample_normalized(trial->ptar, 1.0, trial->N, &trial->seed);
+	trial->dist = fabs( trial->view[trial->saccade_target] - trial->gaze_letter );
+
+	log_handler(trial, target_selected, trial->saccade_target);
 }
 
 void execute_saccade(swift_run * trial) {
 
-	int previous_word = trial->gaze_word;
-
 	execsacc(trial->params, &trial->gaze_letter,&trial->gaze_word,&trial->saccade_target,trial->view,trial->border,trial->len,trial->N,&trial->seed,0,0.0,0);
 
 	trial->is_mislocated = trial->saccade_target != trial->gaze_word;
-	trial->is_refixation = previous_word == trial->gaze_word;
+	trial->is_refixation = trial->prev_gaze_word == trial->gaze_word;
 
 	log_handler(trial, saccade_executed);
 }
@@ -564,14 +597,16 @@ void propagate_counters(swift_run * trial, double dt, int state) {
 	}
 
 	if(trial->n_count[4] >= trial->N_count[4]) {
+		trial->prev_gaze_word = trial->gaze_word;
 		execute_saccade(trial);
 		trial->n_count[4] = 0;
 		trial->states[4] = 0;
-		if(trial->is_mislocated || trial->is_refixation) {
+		if(!trial->is_fitting && (trial->is_mislocated || trial->is_refixation)) {
 			trial->n_count[1] = 0;
 			trial->n_count[2] = 0;
 			trial->states[2] = 1;
 		}
+		trial->fix_saccade_target = trial->saccade_target;
 		log_event(trial, "se");
 	}
 
@@ -747,92 +782,177 @@ void swift_run_until_event(swift_run * trial, int check(swift_run * trial, va_li
 void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, int n_trials, swift_likelihood * likelihood) {
 
 	int N = model->params->nsims;
-	int i, j, k, l, n;
+	int i, j, k, l, n, u, v;
 
 	if(trials == NULL) n = dataset->n;
 	else n = n_trials;
 
 	double **** ll = vector(double***, n);
+	unsigned int *** seeds = vector(unsigned int**, n);
 
 	for(i = 1; i <= n; i++) {
-		ll[i] = (double***) array(double, 3, nfixations(dataset, trials == NULL ? i : trials[i]), 3, N);
-	}
-
-	unsigned int * seeds = vector(unsigned int, n*N);
-	for(i = 1; i <= n*N; i++) {
-		seeds[i] = (unsigned int) ranint(&model->seed);
-	}
-
-	#pragma omp parallel for collapse(2) private(i,j,k,l) schedule(dynamic)
-	for(k = 1; k <= n; k++) {
+		swift_trial * sequence = &dataset->trials[trials == NULL ? i : trials[i]];
+		int nfix = sequence->nfix;
+		int nw = nwords(model->corpus, sequence->sentence);
+		ll[i] = (double***) array(double, 3, nfix, 3, N);
+		seeds[i] = matrix(unsigned int, nfix, N);
 		for(j = 1; j <= N; j++) {
-			swift_trial * sequence = &dataset->trials[trials == NULL ? k : trials[k]];
-			double t_fix_started;
-			double p_variation;
-			double mlp = 0.0;
-
-			swift_run * trial = new_swift_trial(model, sequence->sentence, seeds[j+(k-1)*N]);
-			// set an event handler for when a new state is selected -> save to transition log within trial (trial->w_hist_by_stage)
-			trial->handlers.state_selected = log_transition_to_history;
-
-			W_hist w_hist;
-			w_hist.hist = NULL;
-
-			for(i = 1; i <= sequence->nfix; i++) {
-
-				t_fix_started = trial->t;
-				trial->gaze_letter = sequence->fixations[i].fl;
-				if(sequence->fixations[i].fw > 1) {
-					trial->gaze_letter += trial->border[sequence->fixations[i].fw-1];
-				}
-				trial->gaze_word = sequence->fixations[i].fw;
-
-
-				//trial->is_mislocated = i > 1 && ran1(&trial->seed) < mlp;
-				trial->is_mislocated = i > 1 && trial->saccade_target != trial->gaze_word;
-				trial->is_refixation = i > 1 && sequence->fixations[i-1].fw == trial->gaze_word;
-
-				init_w_hist(&trial->w_hist_by_stage.glob);
-				init_w_hist(&trial->w_hist_by_stage.lab);
-				init_w_hist(&trial->w_hist_by_stage.nlab);
-				init_w_hist(&trial->w_hist_by_stage.sacc);
-				init_w_hist(&w_hist);
-				
-				swift_run_until_event(trial, event_state_changed, 2, 1); // first labile stage started
-				
-				do {
-					transfer_w_hist(&trial->w_hist_by_stage.glob, &w_hist);
-					init_w_hist(&trial->w_hist_by_stage.glob);
-					init_w_hist(&trial->w_hist_by_stage.lab);
-					swift_run_until_event(trial, event_saccade_cancelled_or_nonlabile_stage_started, trial->canc+1);
-				} while(!check_state_changed(trial, 3, 1));
-				transfer_w_hist(&trial->w_hist_by_stage.lab, &w_hist);
-
-				if(i < sequence->nfix) {
-					double x = sequence->fixations[i+1].fl;
-					if(sequence->fixations[i+1].fw > 1) x += trial->border[sequence->fixations[i+1].fw-1];
-					double ll_spat = loglik_spat(trial, x);
-					ll[k][i][1][j] = ll_spat;
-					mlp = 1.0 - exp(loglik_spat_cond(trial, sequence->fixations[i+1].fw, x) - ll_spat);
-				}
-
-				swift_run_until_event(trial, event_state_changed, 4, 1); // saccade execution (4) started (1)
-				transfer_w_hist(&trial->w_hist_by_stage.nlab, &w_hist);
-
-				ll[k][i][2][j] = loglik_temp(&w_hist, sequence->fixations[i].tfix);
-				trial->t = t_fix_started + sequence->fixations[i].tfix;
-				swift_run_until_event(trial, event_state_changed, 4, 0); // saccade execution (4) finished (0)
-				
-				if(i < sequence->nfix) {
-					ll[k][i][3][j] = loglik_temp(&trial->w_hist_by_stage.sacc, sequence->fixations[i].tsac);
-				}
-				trial->t = t_fix_started + sequence->fixations[i].tfix + sequence->fixations[i].tsac;
-
-
+			for(u = 1; u <= nfix; u++) {
+				seeds[i][u][j] = (unsigned int) ranint(&model->seed);
 			}
-			clear_w_hist(w_hist);
-			free_swift_trial(trial);
 		}
+	}
+
+	#pragma omp parallel for collapse(1) private(i,j,k,l,u,v) schedule(dynamic)
+	for(k = 1; k <= n; k++) {
+		swift_run ** ensemble = vector(swift_run*, N);
+		swift_trial * sequence = &dataset->trials[trials == NULL ? k : trials[k]];
+		double t_fix_started, t_sac_started;
+		double p_variation;
+
+		swift_run * trial = new_swift_trial(model, sequence->sentence, seeds[k][1][1]);
+		trial->is_fitting = 1;
+		trial->ptar[sequence->fixations[1].fw] = 1.0;
+		trial->saccade_target = 1;
+		trial->fix_saccade_target = 1;
+		// set an event handler for when a new state is selected -> save to transition log within trial (trial->w_hist_by_stage)
+		trial->handlers.state_selected = log_transition_to_history;
+		trial->gaze_letter = sequence->fixations[1].fl;
+		if(sequence->fixations[1].fw > 1) {
+			trial->gaze_letter += trial->border[sequence->fixations[1].fw-1];
+		}
+		trial->gaze_word = sequence->fixations[1].fw;
+
+
+		W_hist * w_hist = vector(W_hist, N);
+
+		int * saccade_targets = vector(int, N);
+		double * ensemble_logliks = vector(double, N);
+		double * p_spat = vector(double, trial->N);
+
+		for(i = 1; i <= sequence->nfix; i++) {
+
+
+			t_fix_started = trial->t;
+
+			trial->gaze_letter = sequence->fixations[i].fl;
+			if(sequence->fixations[i].fw > 1) {
+				trial->gaze_letter += trial->border[sequence->fixations[i].fw-1];
+			}
+			trial->gaze_word = sequence->fixations[i].fw;
+
+			init_w_hist(&trial->w_hist_by_stage.glob);
+			init_w_hist(&trial->w_hist_by_stage.lab);
+			init_w_hist(&trial->w_hist_by_stage.nlab);
+			init_w_hist(&trial->w_hist_by_stage.sacc);
+
+			double upcoming_location, current_location;
+
+			current_location = sequence->fixations[i].fl;
+			if(sequence->fixations[i].fw > 1) current_location += trial->border[sequence->fixations[i].fw-1];
+			if(i < sequence->nfix) {
+				upcoming_location = sequence->fixations[i+1].fl;
+				if(sequence->fixations[i+1].fw > 1) upcoming_location += trial->border[sequence->fixations[i+1].fw-1];
+			} else {
+				upcoming_location = NAN;
+			}
+
+
+
+
+			for(j = 1; j <= N; j++) {
+
+				ensemble[j] = j == N ? trial : clone_swift_trial(trial, seeds[k][i][j]);
+
+				if(i > 1) {
+					ensemble[j]->saccade_target = saccade_targets[j];
+
+
+					double mlp = 1.0 - exp(p_spat[trial->gaze_word] - logsumexp(p_spat, ensemble[j]->N));
+
+
+					ensemble[j]->is_mislocated = sample_boolean(mlp, &ensemble[j]->seed);
+
+					//printf_vector(p_spat, trial->N, "%.2lf ");
+
+					//printf("%d %.2lf\n", ensemble[j]->is_mislocated, mlp);
+
+					ensemble[j]->is_refixation = sequence->fixations[i-1].fw == ensemble[j]->gaze_word;
+
+					if(ensemble[j]->is_mislocated || ensemble[j]->is_refixation) {
+						ensemble[j]->n_count[1] = 0;
+						ensemble[j]->n_count[2] = 0;
+						ensemble[j]->states[2] = 1;
+					}
+				}
+
+
+				w_hist[j].hist = NULL;
+
+				init_w_hist(&w_hist[j]);
+
+				swift_run_until_event(ensemble[j], event_state_changed, 2, 1); // first labile stage started
+
+				do {
+					transfer_w_hist(&ensemble[j]->w_hist_by_stage.glob, &w_hist[j]);
+					init_w_hist(&ensemble[j]->w_hist_by_stage.glob);
+					init_w_hist(&ensemble[j]->w_hist_by_stage.lab);
+					swift_run_until_event(ensemble[j], event_saccade_cancelled_or_nonlabile_stage_started, ensemble[j]->canc+1);
+				} while(!check_state_changed(ensemble[j], 3, 1));
+				transfer_w_hist(&ensemble[j]->w_hist_by_stage.lab, &w_hist[j]);
+
+				if(i < sequence->nfix) {
+					ll[k][i][1][j] = loglik_spat(ensemble[j], upcoming_location);
+				}
+
+				swift_run_until_event(ensemble[j], event_state_changed, 4, 1); // saccade execution (4) started (1)
+				transfer_w_hist(&ensemble[j]->w_hist_by_stage.nlab, &w_hist[j]);
+
+				ll[k][i][2][j] = loglik_temp(&w_hist[j], sequence->fixations[i].tfix);
+				//trial->t = t_fix_started + sequence->fixations[i].tfix;
+				swift_run_until_event(ensemble[j], event_state_changed, 4, 0); // saccade execution (4) finished (0)
+				
+				if(i < sequence->nfix) {
+					ll[k][i][3][j] = loglik_temp(&ensemble[j]->w_hist_by_stage.sacc, sequence->fixations[i].tsac);
+				}
+
+				ensemble_logliks[j] = ll[k][i][1][j] + ll[k][i][2][j] + ll[k][i][3][j];
+
+				clear_w_hist(w_hist[j]);
+			}
+			
+
+			int best_trial = 1;
+
+			for(j = 2; j <= N; j++) {
+				if(ensemble_logliks[j] > ensemble_logliks[best_trial]) {
+					best_trial = j;
+				}
+			}
+
+			for(j = 1; j <= N; j++) {
+				saccade_targets[j] = ensemble[j]->saccade_target;
+				if(j == best_trial) {
+					trial = ensemble[j];
+					trial->gaze_letter = current_location;
+					trial->gaze_word = trial->prev_gaze_word;
+					for(u = 1; u <= trial->N; u++) {
+						p_spat[u] = loglik_spat_cond(trial, u, upcoming_location);
+					}
+				} else {
+					free_swift_trial(ensemble[j]);
+				}
+			}
+
+
+			trial->t = t_fix_started + sequence->fixations[i].tfix + sequence->fixations[i].tsac;
+		}
+		free_vector(double, p_spat);
+		free_vector(double, ensemble_logliks);
+		free_vector(int, saccade_targets);
+		free_vector(W_hist, w_hist);
+		free_swift_trial(trial);
+		free_vector(swift_run*, ensemble);
 	}
 
 	likelihood->fixation_location = 0.0;
@@ -851,10 +971,11 @@ void loglik_swift(swift_model * model, swift_dataset * dataset, int * trials, in
 			likelihood->saccade_duration += logsumexp(ll[k][i][3], N) - log(N);
 		}
 		free_array(double, ll[k], 3);
+		free_matrix(unsigned int, seeds[k]);
 	}
 
 	free_vector(double***, ll);
-	free_vector(unsigned int, seeds);
+	free_vector(unsigned int**, seeds);
 	
 }
 
@@ -875,6 +996,10 @@ void generate_swift_single(swift_model * model, int s, swift_trial * sequence, u
 
 	sequence->fixations[1].fw = 1;
 	sequence->fixations[1].fl = trial->view[1];
+	trial->saccade_target = 1;
+	trial->fix_saccade_target = 1;
+
+	trial->ptar[trial->saccade_target] = 1.0;
 
 
 	while(1) {

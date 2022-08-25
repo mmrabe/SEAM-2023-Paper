@@ -70,7 +70,6 @@ double lower_inc_gamma_reg(double a, double x) {
    /* Compute  x**a * exp(-x) / Gamma(a) */
    ax=a*log(x) - x - lgamma(a);
    if(ax<-DBL_MAX_10_EXP) return(0.0); // underflow
-   ax=exp(ax);
   
    /* power series */
    r=a; c=1.0; ans=1.0;
@@ -79,7 +78,7 @@ double lower_inc_gamma_reg(double a, double x) {
      c*=x/r;
      ans+=c;
    } while(c/ans > DBL_EPSILON);
-   return(ans*ax/a);
+   return(ans*exp(ax)/a);
 }
 
 double lower_inc_log_gamma_reg(double a, double x) {
@@ -97,7 +96,6 @@ double lower_inc_log_gamma_reg(double a, double x) {
    /* Compute  x**a * exp(-x) / Gamma(a) */
    ax=a*log(x) - x - lgamma(a);
    if(ax<-DBL_MAX_10_EXP) return(-INFINITY); // underflow
-   ax=exp(ax);
   
    /* power series */
    r=a; c=1.0; ans=1.0;
@@ -106,7 +104,7 @@ double lower_inc_log_gamma_reg(double a, double x) {
      c*=x/r;
      ans+=c;
    } while(c/ans > DBL_EPSILON);
-   return(log(ans)+log(ax)-log(a));
+   return(log(ans)+ax-log(a));
 }
 
 double upper_inc_gamma_reg(double a, double x) {
@@ -122,7 +120,6 @@ double upper_inc_gamma_reg(double a, double x) {
   
    ax = a*log(x) - x - lgamma(a);
    if(ax < -DBL_MAX_10_EXP) return(0.0); // underflow
-   ax=exp(ax);
   
    /* continued fraction */
    y=1.0-a; z=x+y+1.0; c=0.0;
@@ -136,7 +133,7 @@ double upper_inc_gamma_reg(double a, double x) {
      pkm2=pkm1; pkm1=pk; qkm2=qkm1; qkm1=qk;
      if(fabs(pk)>big) {pkm2*=biginv; pkm1*=biginv; qkm2*=biginv; qkm1*=biginv;}
    } while(t>DBL_EPSILON);
-   return(ans*ax);
+   return(ans*exp(ax));
 }
 
 double upper_inc_log_gamma_reg(double a, double x) {
@@ -152,7 +149,6 @@ double upper_inc_log_gamma_reg(double a, double x) {
   
    ax = a*log(x) - x - lgamma(a);
    if(ax < -DBL_MAX_10_EXP) return(-INFINITY); // underflow
-   ax=exp(ax);
   
    /* continued fraction */
    y=1.0-a; z=x+y+1.0; c=0.0;
@@ -166,7 +162,7 @@ double upper_inc_log_gamma_reg(double a, double x) {
      pkm2=pkm1; pkm1=pk; qkm2=qkm1; qkm1=qk;
      if(fabs(pk)>big) {pkm2*=biginv; pkm1*=biginv; qkm2*=biginv; qkm1*=biginv;}
    } while(t>DBL_EPSILON);
-   return(log(ans)+log(ax));
+   return(log(ans)+ax);
 }
 
 double gammacdf(double x, double a, double b) {
