@@ -371,7 +371,7 @@ void processing_rate(swift_run * trial, double * procrate)
     
     /* adding decay if as[.]==2 */
     for ( j=1; j<=trial->N; j++ ) {
-        if ( trial->states[4+j] == STATE_POSTLEXICAL || trial->states[4+j] == STATE_POSTRETRIEVAL )  {
+        if ( trial->states[4+j] == STATE_POSTLEXICAL || trial->states[4+j] == STATE_RETRIEVAL || trial->states[4+j] == STATE_POSTRETRIEVAL )  {
             procrate[j] *= trial->params->proc;
             if ( procrate[j]<trial->params->decay )  procrate[j] = trial->params->decay;
         }
@@ -463,7 +463,7 @@ void transition_rates(swift_run * trial) {
 	for ( i=1; i<= trial->N; i++ )  {
 		if(trial->actr.word_processing_block_times[i] > trial->t) trial->W[4+i] = 0.0;
 		else if(trial->states[4+i] == STATE_COMPLETE) trial->W[4+i] = 0.0;
-		else if(trial->states[4+i] == STATE_RETRIEVAL) trial->W[4+i] = 0.0;
+		else if(trial->states[4+i] == STATE_RETRIEVAL && trial->n_count[4+i] <= trial->N_count[4+i] * trial->params->mu2) trial->W[4+i] = 0.0;
 		else if(trial->states[4+i] == STATE_WAITFORRETRIEVAL) trial->W[4+i] = 0.0;
         else if(trial->states[4+i] == STATE_TRIGGERRETRIEVAL) {
 			if(trial->actr.current_retrieval_started + trial->params->mu1 < trial->t) {
@@ -551,6 +551,7 @@ int counter_direction(swift_run * trial, int state) {
 	if(state > 4 && state <= 4 + trial->N) {
 		if(trial->states[state] == STATE_POSTLEXICAL) return -1;
 		if(trial->states[state] == STATE_POSTRETRIEVAL) return -1;
+		if(trial->states[state] == STATE_RETRIEVAL) return -1;
 	}
 	return 1;
 }
@@ -688,7 +689,7 @@ void propagate_counters(swift_run * trial, double dt, int state) {
         trial->actr.current_retrieval_trigger = trial->actr.current_retrieval.trigger;
         log_event(trial, "retrieve %d %d", trial->actr.current_retrieval_id, trial->actr.current_retrieval_trigger);
         if(trial->states[4+trial->actr.current_retrieval_trigger] == STATE_WAITFORRETRIEVAL) {
-            trial->actr.word_processing_block_times[trial->actr.current_retrieval_trigger] = INFINITY;
+            //trial->actr.word_processing_block_times[trial->actr.current_retrieval_trigger] = INFINITY;
             trial->actr.R_count = fmax(1.0, trial->params->aord * trial->params->rfrac);
 			log_event(trial, "s %d %d %d", trial->actr.current_retrieval_trigger, trial->states[trial->actr.current_retrieval_trigger+4], STATE_RETRIEVAL);
             trial->states[4+trial->actr.current_retrieval_trigger] = STATE_RETRIEVAL;

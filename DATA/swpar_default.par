@@ -56,6 +56,6 @@ mas	1.5
 match_penalty	-1.5
 d 0.5
 mu1	50.0
-mu2	0.0
+mu2	1.0
 rfrac 1.0
 iws		1.0
