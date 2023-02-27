@@ -1,0 +1,7 @@
+string cat nil:yes null:yes
+string mom-cat nil:yes null:yes
+enum role nil:yes null:yes 2 spec comp
+enum number nil:yes null:yes 2 sing plu
+bool NOM nil:yes null:yes
+bool ACC nil:yes null:yes
+bool sem nil:yes null:yes
