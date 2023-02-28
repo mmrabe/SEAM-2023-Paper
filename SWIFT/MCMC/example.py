@@ -26,7 +26,7 @@ def validate(model=0, data=0):
 
 print (swift.version())
 
-model = load_model("PB2", "test", seed = 1234)
+model = load_model("RETRO-EN", "test", seed = 1234)
 
 data = load_data("test")
 
@@ -39,5 +39,3 @@ print (get_parameter("delta0", model))
 print (loglik(model, data)) # by default all available cores, add threads=N to set number of threads
 
 
-swift.freemodel(model)
-swift.freedata(data)
