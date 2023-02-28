@@ -27,12 +27,9 @@ swift.version <- function(model=1L, data=1L, threads=0L) {
 	return(ret)
 }
 
-free.model <- function(model=1L) invisible(.Call("swiftr_freemodel", model))
-free.data <- function(data=1L) invisible(.Call("swiftr_freedata", data))
-
 swift.version()
 
-model <- load.model("PB2", "test", seed=1234)
+model <- load.model("RETRO-EN-ACTR", "test", seed=1234)
 
 data <- load.data("test")
 
@@ -42,8 +39,3 @@ get.parameter("delta0", model)
 
 loglik(model, data) # by default all available cores, add threads=N to set number of threads
 
-free.model(model)
-free.data(data)
-
-
-dyn.unload("swiftstat7_r.so")
