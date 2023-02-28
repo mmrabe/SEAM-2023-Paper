@@ -26,7 +26,7 @@ def validate(model=0, data=0):
 
 print (swift.version())
 
-model = load_model("RETRO-EN", "test", seed = 1234)
+model = load_model("RETRO-EN-ACTR", "test", seed = 1234)
 
 data = load_data("test")
 

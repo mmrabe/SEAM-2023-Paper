@@ -29,7 +29,7 @@ swift.version <- function(model=1L, data=1L, threads=0L) {
 
 swift.version()
 
-model <- load.model("RETRO-EN", "test", seed=1234)
+model <- load.model("RETRO-EN-ACTR", "test", seed=1234)
 
 data <- load.data("test")
 
