@@ -1,0 +1,883 @@
+---
+title: "SEAM Analyses"
+author: "Maximilian M. Rabe"
+date: "2023-02-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+theme_apa <- function(..., base_size = 10, tilted_axis = FALSE) theme(
+  text = element_text(family = "serif", size = base_size),
+  panel.grid = element_blank(),
+  strip.background = element_blank(),
+  strip.text = element_text(size = rel(1), face = "bold"),
+  panel.background = element_rect(fill = NA, color = "black"),
+  axis.text = element_text(size = rel(1), color = "black"),
+  axis.text.x = if(!isTRUE(tilted_axis)) element_text() else element_text(angle = 45, hjust = 1)
+)
+```
+
+
+```{r, warning=FALSE}
+# Load libraries
+library(tibble)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(magrittr)
+library(coda)
+library(rstan)
+library(hypr)
+library(brms)
+library(emmeans)
+library(parallel)
+
+cond_match <- function(x, y, cond) which(cond)[match(x, y[cond])] # conditional match function
+cache <- function(x, name, file = paste0("cache/cache_",name,".rds")) {  # custom cache function
+  if(!dir.exists(dirname(file))) {
+    dir.create(dirname(file))
+  }
+  if(file.exists(file)) {
+    readRDS(file)
+  } else {
+    saveRDS(x, file)
+    x
+  }
+}
+
+# Set paths
+data.dir <- "./DATA"
+sim.dir <- "./SIM"
+mcmc.dir <- "./FIT"
+recovery.dir <- "./RECOVERY"
+corpus.name <- "RETRO-EN-seam"
+```
+
+## Mertzen (2023) Results
+
+```{r mertzen}
+
+m_EN_fpr_verb <- readRDS("./X-MERTZEN2023/m_EN_fpr.rds")
+m_EN_fpr_verb_ex <- extract(m_EN_fpr_verb)
+m_EN_fpr_adverb <- readRDS("./X-MERTZEN2023/m_EN_fpr_pre.rds")
+m_EN_fpr_adverb_ex <- extract(m_EN_fpr_adverb)
+m_EN_rpd_verb <- readRDS("./X-MERTZEN2023/m_EN_rpd.rds")
+m_EN_rpd_verb_ex <- extract(m_EN_rpd_verb)
+m_EN_rpd_adverb <- readRDS("./X-MERTZEN2023/m_EN_rpd_pre.rds")
+m_EN_rpd_adverb_ex <- extract(m_EN_rpd_adverb)
+
+dat <-
+  bind_rows(
+    tibble(
+      subj = m_EN_fpr_verb_ex$subjPos*100,
+      anim = m_EN_fpr_verb_ex$anim*100,
+      variable = "FPR",
+      region = "verb"
+    ),
+    tibble(
+      subj = m_EN_fpr_adverb_ex$subjPos*100,
+      anim = m_EN_fpr_adverb_ex$anim*100,
+      variable = "FPR",
+      region = "adverb"
+    ),
+    tibble(
+      subj = m_EN_rpd_verb_ex$subjPos,
+      anim = m_EN_rpd_verb_ex$anim,
+      variable = "RPD",
+      region = "verb"
+    ),
+    tibble(
+      subj = m_EN_rpd_adverb_ex$subjPos,
+      anim = m_EN_rpd_adverb_ex$anim,
+      variable = "RPD",
+      region = "adverb"
+    )
+  ) %>% 
+  pivot_longer(cols = c("subj","anim")) %>% 
+  mutate(value = as.vector(value)) %>%
+  cache("mertzen2023")
+
+
+dat %>%
+  ggplot() +
+  theme_apa() +
+  theme(legend.position = "bottom") +
+  facet_grid(variable~region, scales = "free_y") +
+  geom_violin(aes(x=name,y=value), position = position_dodge(), draw_quantiles=.5, linewidth = .75, width = .8) +
+  geom_hline(yintercept = 0, linetype="dashed") +
+  labs(x = NULL, y = "Linear effect (backtransformed)", color = NULL)
+
+```
+
+
+## Profile Likelihoods
+
+```{r}
+# Functions for use with SEAM/SWIFT library
+
+load.model <- function (corpus, dir = "../DATA", parfile = file.path(dir, "swpar_default.par"), seed = runif(1, 0, 2**31)) {
+  .Call("swiftr_loadmodel", dir, parfile, file.path(dir, sprintf("corpus_%s.dat", corpus)), seed)
+}
+
+load.data <- function (seqid, dir = "../DATA") .Call("swiftr_loaddata", file.path(dir, sprintf("fixseqin_%s.dat", seqid)))
+
+update.parameter <- function(param_name, param_value, model) {
+  stopifnot(length(param_name)==length(param_value))
+  for(i in seq_along(param_name)) {
+    if(startsWith(param_name[i], "log_")) {
+      param_name[i] <- substr(param_name[i], 5, 100)
+      param_value[i] <- exp(param_value[i])
+    }
+    if(is.null(.Call("swiftr_update", model, param_name[i], param_value[i]))) {
+      stop(sprintf("Setting %s to %f failed.", param_name[i], param_value[i]))
+    }
+  }
+}
+
+get.parameter <- function(param_name, model) {
+  ret <- .Call("swiftr_getparam", model, param_name);
+  if(is.null(ret)) NA else ret
+}
+
+get.parameters <- function(param_names, model) {
+  sapply(param_names, get.parameter, model = model, simplify = FALSE)
+}
+
+loglik <- function(model=1L, data=1L, threads=0L) .Call("swiftr_eval", model, data, threads)
+
+# Ranges for parameter recovery
+
+likprof_ranges <- list(
+  delta0 = seq(4, 15, length.out = 50),
+  log_misfac = seq(-1, 1, length.out = 50),
+  log_refix = seq(-1, 1, length.out = 50),
+  msac = seq(1, 6, length.out = 50),
+  F = seq(0.01, 2.0, length.out = 50),
+  log_d = seq(-4, 2, length.out = 50),
+  mu1 = seq(0, 500, length.out = 50),
+  mu2 = seq(0, 2, length.out = 50),
+  rfrac = seq(0, 2, length.out = 50),
+  match_penalty = seq(-3, 3, length.out = 50),
+  mas = seq(-2, 4, length.out = 50)
+)
+
+
+parse_param_names <- function(labels, multi_line = TRUE) {
+  param_labels <- c(
+    "delta0" = "italic(delta)[0]",
+    "msac" = "italic(t)[sac]",
+    "mu1" = "italic(mu)[1]",
+    "mu2" = "italic(mu)[2]",
+    "rfrac" = "italic(mu)[3]",
+    "log_rfrac" = "log~italic(mu)[3]",
+    "refix" = "italic(R)",
+    "d" = "italic(d)",
+    "log_d" = "log~italic(d)",
+    "log_refix" = "log~italic(R)",
+    "log_misfac" = "log~italic(M)",
+    "match_penalty" = "italic(p)",
+    "mas" = "italic(S)[max]",
+    "F" = "italic(F)",
+    "h" = "italic(h)[0]"
+  )
+  for(col in ncol(labels)) {
+    matched_labels <- match(labels[,col], names(param_labels))
+    labels[,col] <- ifelse(is.na(matched_labels), paste0("\"",labels[,col],"\""), param_labels[matched_labels])
+  }
+  label_parsed(labels = labels, multi_line = multi_line)
+}
+
+
+
+
+```
+
+
+```{r profileloglik}
+
+true_values <- read.table(file.path(data.dir, "swpar_seam_default.par"), col.names = c("param","value")) %>%
+  bind_rows(
+    ., mutate(., param = paste0("log_", param), value = suppressWarnings(log(value)))
+  ) %>%
+  filter(param %in% names(likprof_ranges))
+
+
+likprofs <- {
+  
+  # Generate data set
+  
+  system2(file.path("SEAM","SIM","swiftstat7p"), c("-gxc", corpus.name, "-r", 12345678, "-i", data.dir, "-o", sim.dir, "-s", "recovery", "-Pruns=1,output_ahist=0,output_events=0", "-I", "7-46"))
+  
+  # Load library
+  
+  dyn.load(file.path("SEAM","MCMC","swiftstat7_r.so"))
+  
+  # Load data
+  data <- load.data("recovery", sim.dir)
+  
+  # Initialize model with default parameters
+  model <- load.model(corpus.name, dir = data.dir, parfile = file.path(data.dir, "swpar_seam_default.par"), seed = 220620)
+
+  bind_rows(lapply(names(likprof_ranges), function(parname) {
+
+    update.parameter("runs", 1, model)
+    update.parameter("nsims", 10, model)
+  
+    parvals <- likprof_ranges[[parname]]
+  
+    
+    mat <- do.call(rbind, lapply(seq_along(parvals), function(i) {
+      update.parameter(parname, parvals[i], model)
+      ret <- loglik(model, data)
+      ret
+    }))
+  
+    update.parameter(parname, true_values$value[match(parname, true_values$param)], model)
+  
+    tibble(param = parname, value = parvals, loglik = mat)
+  
+  }))
+  
+} %>% cache("profile_logliks")
+
+
+dat <- likprofs %>%
+  mutate(param = factor(param, levels = names(likprof_ranges))) %>%
+  group_by(param, value) %>%
+  transmute(combined = loglik[,1], temporal = loglik[,2], spatial = loglik[,3]) %>%
+  pivot_longer(everything() & !c(param, value), names_to = "type", values_to = "loglik") %>%
+  group_by(param, type) %>%
+  mutate(loglik=loglik-mean(loglik[is.finite(loglik)]))
+
+ggplot(dat) +
+  theme_apa() +
+  theme(strip.placement = "outside", legend.position = "bottom", legend.box.spacing = unit(0,"cm"), strip.switch.pad.wrap = unit(-3,"pt"), strip.background = element_blank()) +
+  facet_wrap(vars(param), ncol = 3, strip.position = "bottom", scales = "free", labeller = parse_param_names) +
+  geom_point(aes(x=value, y=loglik, color = type), size = 0.5, alpha = 0.5) +
+  stat_smooth(aes(x=value, y=loglik, color = type, linetype = type), formula = y ~ s(x, bs = "cs"), linewidth = 0.5, se = FALSE, method = "gam", alpha = 0.5) +
+  scale_y_continuous() +
+  scale_color_manual(breaks = c("spatial","temporal","combined"), values = c("orange", "blue","black")) +
+  scale_linetype_manual(breaks = c("spatial","temporal","combined"), values = c("dashed","dashed","solid")) +
+  #geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_vline(aes(xintercept = value), linetype = "dashed", color = "red", true_values) +
+  labs(x = NULL, y = "Centered log-likelihood", color = NULL, linetype = NULL)
+
+```
+
+## Parameter Recovery
+
+```{r recovery}
+burn_in <- 10000
+
+results <- lapply(1:50, function(i) {
+  parfile <- sprintf("%s/swpar_recovery_%d.par",recovery.dir,i)
+  mcmcfile <- sprintf("%s/mcmc_recovery_%d.rds",recovery.dir,i)
+  if(!file.exists(parfile) || !file.exists(mcmcfile)) return(NULL)
+
+  mcmc <- readRDS(mcmcfile)
+
+  pars <- read.table(parfile, col.names = c("param", "value")) %>% bind_rows(., mutate(filter(., value >= 0), value = log(value), param = paste0("log_",param)))
+
+  samples <- bind_rows(lapply(seq_along(mcmc$chain), function(j) {
+    mcmc$chain[[j]] %>%
+      as_tibble() %>%
+      pack(values = c(-LP, -LL, -LPr), LL = c(LP, LL, LPr)) %>%
+      mutate(chain = j, iter = 1:n())
+  }))
+
+  parnames <- colnames(samples$values)
+
+  list(true_values = pars, sampled_values = samples, gelman = gelman.diag(mcmc$chain[,parnames]))
+
+}) %>% cache("recovery")
+
+true_values <- bind_rows(lapply(seq_along(results), function(i) if(is.null(results[[i]])) NULL else results[[i]]$true_values %>% mutate(job = i)))
+
+true_values_wide <- true_values %>% pivot_wider(id_cols = job, names_from = param, values_from = value)
+
+samples <- bind_rows(lapply(seq_along(results), function(i) if(is.null(results[[i]])) NULL else results[[i]]$sampled_values %>% mutate(job = i)))
+
+mpsrfs <- vapply(results, function(result) if(is.null(result$gelman$mpsrf)) NA_real_ else result$gelman$mpsrf, 1)
+
+which_jobs <- which(!is.na(mpsrfs) & mpsrfs < 1.1)
+
+samples_narrow <- samples %>% filter(iter > burn_in & job %in% which_jobs) %>% unpack(values) %>% pivot_longer(c(-job,-iter,-chain,-LL), names_to = "param") %>% group_by(job, param) %>% left_join(true_values %>% select(job, param, true_value = value), by = c("job","param"))
+
+samples_summary <- samples_narrow %>% summarize(true_value = first(true_value), HPDI = HPDinterval(as.mcmc(value), prob = .95), NRMSE = sqrt(mean((value-true_value)^2))/diff(range(true_values$value[true_values$param == first(param)])), HPDI_NRMSE = sqrt(mean((value-true_value)[value >= HPDI[,"lower"] & value <= HPDI[,"upper"]]^2))/diff(range(true_values$value[true_values$param == first(param)])), mHPDI = mean(value[value >= HPDI[,"lower"] & value <= HPDI[,"upper"]]), midHPDI = (HPDI[,"lower"]+HPDI[,"upper"])/2, MAP = value[which.max(LL$LL)], MPSRF = mpsrfs[first(job)])
+
+samples_summary %>% group_by(param) %>% summarize_at(vars(MAP, mHPDI, midHPDI), list(NRMSE=~sqrt(mean((true_value-.)^2))/diff(range(.)))) # NRMSE (normalized root mean squared error)
+samples_summary %>% group_by(param) %>% summarize_at(vars(NRMSE, HPDI_NRMSE), mean)
+
+good_and_bad_jobs <- samples_summary %>% group_by(job) %>% summarize_at(vars(NRMSE, HPDI_NRMSE), mean)
+
+samples_summary <- samples_summary %>% ungroup() %>% mutate(rank_between = rank(good_and_bad_jobs$HPDI_NRMSE)[match(job, good_and_bad_jobs$job)]) %>% group_by(param) %>% mutate(rank_within = rank(HPDI_NRMSE))
+
+
+samples_summary %>% group_by(param) %>% summarize(ICC = cor(rank_between, true_value), mNRMSE = mean(NRMSE))
+
+
+panel_bounds <- samples_summary %>% group_by(param) %>% summarize(lb = min(HPDI[,1], true_value), ub = max(HPDI[,2], true_value))
+
+panel_bounds_coords <- panel_bounds %>% group_by(param) %>% summarize(x=c(lb,ub),y=c(lb,ub))
+
+ggplot(samples_summary) +
+  geom_abline(linetype = "dashed") +
+  facet_wrap(~param, scales = "free", labeller = parse_param_names) +
+  geom_point(aes(x=x,y=y), color="transparent", panel_bounds_coords) +
+  scale_color_gradient2(low = "#000000", midpoint = 1.05, mid ="#ffee00", high = "#ff0000", name = expression(hat(italic(R)))) +
+  geom_pointrange(aes(x = true_value, ymin = HPDI[,1], y = mHPDI, ymax = HPDI[,2]), color = "gray40", fatten = 1) +
+  labs(x = "True parameter", y = "Recovered parameter") +
+  geom_label(aes(x = Inf, y = -Inf, label = sprintf("r = %.2f",r)), vjust = -0, hjust = 1, samples_summary %>% group_by(param) %>% summarize(r = cor(true_value, mHPDI)), alpha = .5, label.size = unit(0,"pt"), label.r = unit(0,"mm")) +
+  geom_label(aes(x = -Inf, y = Inf, label = sprintf("RMSE = %.2f",mNRMSE)), vjust = 1, hjust = -0, samples_summary %>% group_by(param) %>% summarize(mNRMSE = mean(NRMSE)), alpha = .5, label.size = unit(0,"pt"), label.r = unit(0,"mm")) +
+  theme_apa() +
+  theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
+```
+
+## SEAM/SWIFT Simulation Results
+
+```{r read-fixseqs-funs}
+# Functions for reading corpus and fixseq files and to annotate fixseqs
+read.fixseq <- function(fixseq_file) {
+  ret <- read.table(fixseq_file)
+  colnames(ret)[1:6] <- c("sno", "fw", "fl", "tfix", "tsac", "first_last")
+  ret
+}
+
+read.corpus <- function(corpus_file) {
+  corpus = read.table(corpus_file, sep="\t", row.names = NULL, header=F)
+  colnames(corpus)[1:3] = c("nw","nl","wfreq")
+  colnames(corpus)[4:ncol(corpus)] = paste0("V", 1:(ncol(corpus)-3))
+
+  # where (at which line) does each sentence begin?
+  corpus.itemstart <- rep(FALSE, nrow(corpus))
+  i <- 1
+  while(i <= nrow(corpus)) {
+    corpus.itemstart[i] <- TRUE
+    i <- i + corpus$nw[i]
+  }
+  corpus.itemstart <- which(corpus.itemstart)
+  # note: length of corpus.itemstart equals number of sentences in corpus
+
+  # repeat each sentence number (1..n) as often as there are words b/c each sentence has so many lines
+  corpus$sno = rep(1L:length(corpus.itemstart), corpus$nw[corpus.itemstart])
+  # only first word has $nw != NA, so set all words' $nw to the value that the first word in that sentence has
+  corpus$nw = corpus$nw[corpus.itemstart[corpus$sno]]
+  corpus$iw = do.call(.Primitive("c"), lapply(1L:length(corpus.itemstart), function(i) 1L:corpus$nw[corpus.itemstart[i]]))
+
+  return(corpus)
+}
+
+fixseq_annotate <- function(fixseq, corpus) {
+  trial_starts <- which(fixseq$first_last == 1)
+  trial_ends <- which(fixseq$first_last == 2)
+  stopifnot(length(trial_starts) == length(trial_ends))
+  stopifnot(trial_starts < trial_ends)
+  fixseq$trial_id <- NA_integer_
+  fixseq$ifix <- NA_integer_
+  fixseq$word_id <- match(paste(fixseq$sno, fixseq$fw), paste(corpus$sno, corpus$iw))
+  for(i in seq_along(trial_starts)) {
+    fixseq$trial_id[trial_starts[i]:trial_ends[i]] <- i
+    fixseq$ifix[trial_starts[i]:trial_ends[i]] <- seq_len(trial_ends[i]-trial_starts[i]+1)
+  }
+  fixseq %>%
+    group_by(trial_id, sno, subject) %>%
+    mutate(new_location = fw != lag(fw, default = 0)) %>%
+    mutate(event_id = ifix[which(new_location)[cumsum(new_location)]]) %>%
+    mutate(
+      event_len = vapply(seq_along(event_id), function(i) sum(event_id == event_id[i]), integer(1)),
+      is_fwfix = fw == lag(fw) + 1,
+      is_refix = fw == lag(fw),
+      is_frefix = is_refix & fl > lag(fl),
+      is_brefix = is_refix & !is_frefix,
+      is_fwrefix = fw == lag(fw) & is_fwfix[event_id],
+      is_ffwrefix = is_fwrefix & fl > lag(fl),
+      is_bfwrefix = is_fwrefix & !is_frefix,
+      is_reg = fw < lag(fw),
+      is_regout = lead(is_reg),
+      is_skip = fw > lag(fw) + 1,
+      is_singlefix = fw != lag(fw) & fw != lead(fw),
+      path = c(1L, vapply(2:n(), function(i) {
+        sum(is_reg[seq_len(i-1)], na.rm = TRUE) + 1L
+      }, integer(1))),
+      pass = {
+        ret <- integer(corpus$nw[match(first(sno), corpus$sno)])
+        ret[fw[1]] <- 1L
+        ret2 <- rep(1L, n())
+        for(i in seq_along(fw)[-1]) {
+          if(fw[i] > fw[i-1]) {
+            is <- ((fw[i-1]+1):fw[i])
+            ret[is] <- ret[is] + 1L
+          }
+          if(fw[i] < fw[i-1]) {
+            ret[fw[i]] <- ret[fw[i]] + 1L
+          }
+          ret2[i] <- ret[fw[i]]
+        }
+        ret2
+      }
+    ) %>%
+    mutate(
+      first_fix_dur = ifelse(new_location & !lead(is_refix, default = FALSE), tfix, NA),
+      first_fwfix_dur = ifelse(is_fwfix & !lead(is_refix, default = FALSE), tfix, NA),
+      single_fix_dur = ifelse(is_singlefix, tfix, NA),
+      single_fwfix_dur = ifelse(is_fwfix & is_singlefix, tfix, NA),
+      gaze_dur = vapply(1:n(), function(i) {
+        if(new_location[i])
+          sum(tfix[event_id == event_id[i]])
+        else
+          NA
+      }, double(1)),
+      refix_dur = ifelse(is_refix, tfix, NA),
+      fwrefix_dur = ifelse(is_fwrefix, tfix, NA),
+      reg_dur = ifelse(is_reg, tfix, NA),
+      gopast_dur = {
+        ret <- rep(NA_real_, length(pass))
+        ret[pass == 1L & is_skip] <- 0 # GPD is 0 if word is skipped in first-pass
+        where_fp <- which(pass == 1L & new_location)
+        for(j in where_fp) {
+          ind <- which(fw > fw[j])
+          if(length(ind) > 0) {
+            ret[j] <- sum(tfix[j:(ind[1]-1)])
+          }
+        }
+        ret
+      }
+    )
+}
+```
+
+```{r sim-params}
+models <- c("seam","swift")
+
+burn_in <- 7500
+
+jobs <- expand.grid(model = models, subject = 1:61)
+
+
+results <- lapply(seq_len(nrow(jobs)), function(i) {
+  mcmcfile <- sprintf("%s/mcmc_%s_%d.rds",mcmc.dir,jobs$model[i],jobs$subject[i])
+
+  if(!file.exists(mcmcfile)) return(NULL)
+
+
+  mcmc <- readRDS(mcmcfile)
+
+  samples <- bind_rows(lapply(seq_along(mcmc$chain), function(j) {
+    mcmc$chain[[j]] %>%
+      as_tibble() %>%
+      pack(values = c(-LP, -LL, -LPr), LL = c(LP, LL, LPr)) %>%
+      mutate(chain = j, iter = 1:n())
+  }))
+
+  parnames <- colnames(samples$values)
+
+  list(sampled_values = samples, gelman = gelman.diag(mcmc$chain[,parnames]))
+
+}) %>% cache("sim_chains")
+
+mpsrfs <- vapply(results, function(result) if(is.null(result$gelman$mpsrf)) NA_real_ else result$gelman$mpsrf, 1)
+
+which_jobs <- which(!is.na(mpsrfs) & mpsrfs < 1.1)
+
+
+samples_narrow <- lapply(seq_along(results), function(i) if(is.null(results[[i]]) || !i %in% which_jobs) NULL else results[[i]]$sampled_values %>% mutate(job = i) %>% filter(iter > burn_in) %>% unpack(values) %>% pivot_longer(c(-job,-iter,-chain,-LL), names_to = "param") %>% group_by(job, param)) %>% bind_rows()
+
+samples_wide <- samples_narrow %>% select(-LL) %>% pivot_wider(c(job, chain, iter), names_from = param, values_from = value)
+
+samples_summary <- samples_narrow %>% summarize(HPDI = HPDinterval(as.mcmc(value), prob = .60), mHPDI = mean(value[value >= HPDI[,"lower"] & value <= HPDI[,"upper"]]), midHPDI = (HPDI[,"lower"]+HPDI[,"upper"])/2, MAP = value[which.max(LL$LL)], MPSRF = mpsrfs[first(job)], .groups = "drop") %>% bind_cols(., jobs[.$job,])
+
+
+default_params <- sapply(models, function(model) read.table(file.path(data.dir, sprintf("swpar_%s_default.par", model)), col.names = c("param","value"), colClasses = "character"), simplify = FALSE)
+
+set.seed(20221107)
+seeds <- round(runif(nrow(jobs), max = 1e8))
+
+```
+
+
+```{r read-fixseqs}
+
+items <- read.csv(file.path(data.dir,"items.csv"))
+corpus <- read.corpus(file.path(data.dir, "corpus_RETRO-EN-swift.dat")) %>%
+  group_by(sno) %>%
+  mutate(
+    x1 = cumsum(nl+1),
+    x0 = lag(x1, default = 0)
+  )
+
+fixseqs_exp_annotated <- 
+  lapply(unique(jobs$subject), function(subject) {
+  read.fixseq(file.path(data.dir, sprintf("fixseqin_%s-1abcd-test.dat", subject))) %>% bind_cols(subject = subject)
+}) %>% bind_rows() %>% fixseq_annotate(corpus) %>% cache("fixseqs_exp_annotated")
+
+fixseqs_sim_annotated <- 
+  lapply(which_jobs, function(i) {
+  snos_to_predict <- unique(fixseqs_exp$sno[fixseqs_exp$subject == jobs$subject[i]])
+
+  fitted_params <- samples_summary %>% filter(job == i) %>% select(-job) %>% transmute(param, value = midHPDI)
+  log_params <- startsWith(fitted_params$param, "log_")
+  fitted_params[log_params, ] <- fitted_params[log_params, ] %>% transmute(param = substr(param, 5, 100), value = exp(value))
+  fitted_params$value <- sprintf("%g", fitted_params$value)
+  joined_params <- default_params[[jobs$model[i]]] %>% mutate(value = ifelse(param %in% fitted_params$param, fitted_params$value[match(param, fitted_params$param)], value))
+  write.table(joined_params, file.path(sim.dir, sprintf("swpar_RETRO-EN-%1$s_%1$s_%2$s_test_midHPDI.par", jobs$model[i], jobs$subject[i])), col.names = FALSE, row.names = FALSE, quote = FALSE)
+  system2(file.path(toupper(jobs$model[i]), "SIM", "swiftstat7p"), c("-qg", "-c", sprintf("RETRO-EN-%s", jobs$model[i]), "-s", sprintf("%s_%s_test_midHPDI", jobs$model[i], jobs$subject[i]), "-e", data.dir, "-i", sim.dir, "-I", paste(snos_to_predict, collapse=","), "-o", sim.dir, "-P", "output_ahist=0,output_events=1,runs=1", "-r", seeds[i]))
+  read.fixseq(file.path(sim.dir, sprintf("fixseqin_%s_%s_test_midHPDI.dat", jobs$model[i], jobs$subject[i]))) %>% mutate(job = i)
+
+}) %>% bind_rows() %>% rename(subject = job) %>% fixseq_annotate(corpus)  %>% cache("fixseqs_sim_annotated")
+
+schedule_sim <- lapply(which_jobs, function(i) {
+  sim_events <- read.table(file.path(sim.dir, sprintf("events_%s_%s_test_midHPDI.dat", jobs$model[i], jobs$subject[i])), sep ="\t", col.names = c("sno","t","event"))
+  lapply(c("1a","1b","1c","1d"), function(cond) {
+    snos <- items$sno[items$condition == cond]
+    word_verb <- if_else(cond %in% c("1c","1d"), 17, 16)
+    word_adverb <- word_verb - 1
+    df1 <- fixseqs_sim_annotated %>%
+      rename(job = subject) %>%
+      filter(sno %in% snos & job == i) %>%
+      group_by(sno) %>%
+      summarize(
+        t_adverb_first_fixated = lag(cumsum(tfix+tsac), default = 0)[cond_match(word_adverb, fw, pass == 1)],
+        t_adverb_rpd = gopast_dur[cond_match(word_adverb, fw, pass == 1)],
+        t_verb_first_fixated = lag(cumsum(tfix+tsac), default = 0)[cond_match(word_verb, fw, pass == 1)],
+        t_verb_rpd = gopast_dur[cond_match(word_verb, fw, pass == 1)]
+      )
+    df2 <- sim_events %>%
+      filter(sno %in% snos) %>%
+      group_by(sno) %>%
+      summarize(
+        job = i,
+        df1[match(first(sno), df1$sno), c("t_adverb_first_fixated", "t_adverb_rpd", "t_verb_first_fixated", "t_verb_rpd")],
+        t_critical_retrieval_started = t[first(grep(paste0("^retrieve [0-9]+ ",word_verb,"$"), event))],
+        t_precritical_retrieval_started = t[last(which(grepl(paste0("^retrieve [0-9]+ [0-9]+$"), event) & t < t_critical_retrieval_started))],
+        t_precritical_retrieval_ended = t[last(which(grepl(paste0("^match [0-9]+ [0-9]+$"), event) & t < t_critical_retrieval_started))],
+        t_last_retrieval_target_completed = t[last(which(grepl(paste0("^s [0-9]+ 6 7$"), event) & t < t_critical_retrieval_started))]
+      )
+  }) %>% bind_rows()
+}) %>% bind_rows() %>% cache("schedule_sim")
+
+fixseqs_all <- bind_rows(
+  fixseqs_exp_annotated %>% mutate(model = "experiment"),
+  fixseqs_sim_annotated %>% rename(job = subject) %>% bind_cols(., jobs[.$job,, drop = FALSE])
+) %>%
+  group_by(trial_id) %>%
+  mutate(
+    x = corpus$x0[match(paste(sno, fw), paste(corpus$sno, corpus$iw))] + fl,
+    sacamp = x - lag(x)
+  )
+
+```
+
+
+```{r fixstats}
+
+fs <- fixseqs_all %>%
+  group_by(subject, model, sno, trial_id) %>%
+  mutate(is_critical_verb = (sno %in% items$sno[items$condition %in% c("1c","1d")] & fw == 17) | (sno %in% items$sno[items$condition %in% c("1a","1b")] & fw == 16)
+  ) %>%
+  summarize(
+    word_id = corpus$iw[corpus$sno == first(sno)],
+    RPD = gopast_dur[cond_match(word_id, fw, pass == 1)],
+    TVT = vapply(word_id, function(w) sum(gaze_dur[fw == w], na.rm = TRUE), double(1)),
+    FPRT = gaze_dur[cond_match(word_id, fw, pass == 1)],
+    FPS = is_skip[cond_match(word_id, fw, pass == 1)],
+    FPR = is_regout[cond_match(word_id, fw, pass == 1)], # !is.na(cond_match(word_id, fw, pass == 1 & is_regout)),
+    FPRI = is_reg[cond_match(word_id, fw, lag(pass == 1, 1, TRUE))],
+    FPRI_from_verb = is_reg[cond_match(word_id, fw, lag(pass == 1 & is_critical_verb, 1, FALSE))]
+  ) %>%
+  mutate(
+    RPD_zi = if_else(is.na(RPD), 0, RPD),
+    across(c("FPR","FPRI","FPRI_from_verb","FPS"), ~if_else(is.na(.x), FALSE, .x)),
+    condition = factor(items$condition[match(sno, items$sno)], levels = c("1a","1b","1c","1d")),
+    itemid = items$itemid[match(sno, items$sno)],
+    region = case_when(
+      condition %in% c("1c","1d") & word_id == 17 | condition %in% c("1a","1b") & word_id == 16 ~ "verb",
+      condition %in% c("1c","1d") & word_id == 16 | condition %in% c("1a","1b") & word_id == 15 ~ "adverb",
+      condition %in% c("1c","1d") & word_id == 13 | condition %in% c("1a","1b") & word_id == 14 ~ "distractor",
+      word_id == 6 ~ "target",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+```{r glob-fixstats}
+
+stat_summary_by_freq <- fs %>%
+  ungroup() %>%
+  mutate(wfreq = corpus$wfreq[match(paste(sno,word_id),paste(corpus$sno,corpus$iw))]) %>%
+  mutate(fg = cut_number(log(wfreq), n=6))
+
+
+contrasts(stat_summary_by_freq$fg, how.many = 6) <- diag(6)
+
+stat_summary_by_freq_narrow <- stat_summary_by_freq %>%
+  pivot_longer(cols = c("FPRT","TVT","RPD","FPR","FPRI","FPS"), names_to = "variable", values_to = "value")
+
+
+stat_summary_jobs <- crossing(variable = c("FPRT","TVT","RPD","FPR","FPRI","FPS"), model = c("experiment","seam","swift"))
+
+
+stat_estimates <- lapply(seq_len(nrow(stat_summary_jobs)), function(i) {
+  m <- brm(
+    value ~ 0 + fg + (0 + fg | sno) + (0 + fg | subject),
+    family = if(stat_summary_jobs$variable[i] %in% c("FPR","FPRI","FPS")) bernoulli("logit") else hurdle_lognormal(),
+    data = stat_summary_by_freq_narrow %>% filter(variable == stat_summary_jobs$variable[i] & model == stat_summary_jobs$model[i]),
+    chains = 4,
+    cores = 4,
+    refresh = 100
+  ) %>% cache(paste0("m_stat_summary_by_freq_", stat_summary_jobs$variable[i], "_", stat_summary_jobs$model[i]))
+  backtransform <- if(stat_summary_jobs$variable[i] %in% c("FPR","FPRI","FPS")) function(x) exp(x)/(1+exp(x)) else exp
+  fixef(m) %>% as_tibble() %>% transmute(fg = factor(levels(stat_summary_by_freq_narrow$fg), levels = levels(stat_summary_by_freq_narrow$fg)), Estimate = backtransform(Estimate), Q2.5 = backtransform(Q2.5), Q97.5 = backtransform(Q97.5)) %>% bind_cols(stat_summary_jobs[i,])
+}) %>% bind_rows()
+
+ggplot(stat_estimates, aes(x=fg,y=Estimate,color=model,fill=model,group=model)) +
+  theme_apa() +
+  theme(strip.placement = "outside", strip.background = element_blank(), strip.text = element_text(face = "plain"), legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  facet_wrap(~variable, scales = "free_y", strip.position = "left") +
+  geom_point() +
+  geom_ribbon(aes(ymin=Q2.5,ymax=Q97.5), color = NA, alpha = .5) +
+  geom_line() +
+  labs(x = "Word log-frequency", y = NULL, color = NULL) +
+  scale_color_manual(breaks = c("experiment", "seam", "swift"), values = c("darkgray", "orange", "purple"), labels = c("Experiment","SEAM","SWIFT")) +
+  scale_fill_manual(breaks = c("experiment", "seam", "swift"), values = c("darkgray", "orange", "purple"), labels = c("Experiment","SEAM","SWIFT"), guide = "none")
+```
+
+```{r effects-fits}
+
+backtransform_betas <- function(posterior, hypotheses, transform) {
+  if(!setequal(names(hypotheses), colnames(posterior))) stop("Set of column names of posterior matrix (",paste(colnames(posterior), collapse=", "),") must be equal to set of hypothesis levels (",paste(names(hypotheses), collapse=", "),")!")
+  t(hmat(hypotheses) %*% transform(cmat(hypotheses) %*% t(posterior[,names(hypotheses)])))
+}
+
+cs <- hypr(anim = ~(`1b`+`1d`)/2-(`1a`+`1c`)/2, subj = ~(`1c`+`1d`)/2-(`1a`+`1b`)/2, `subj:anim` = ~(`1a`-`1b`)-(`1c`-`1d`), levels = levels(fs$condition))
+
+contrasts(fs$condition) <- cs
+
+m_priors <- list(
+  RPD = prior("normal(0,10)", "Intercept") + prior("normal(0,0.1)", "b") + prior("normal(0,0.5)", "sd") + prior("lkj(2)", "cor"),
+  FPR = prior("normal(0,2)", "Intercept") + prior("normal(0,0.5)", "b") + prior("normal(0,1)", "sd") + prior("lkj(2)", "cor"),
+  FPRI = prior("normal(0,2)", "Intercept") + prior("normal(0,0.5)", "b") + prior("normal(0,1)", "sd") + prior("lkj(2)", "cor")
+)
+
+brms_jobs <- crossing(
+  model = c("experiment","seam","swift"),
+  data = c("test"),
+  region = c("adverb", "verb"),
+  dv = c("RPD", "RPD_zi", "FPR")
+)
+
+brms_fits <- lapply(seq_len(nrow(brms_jobs)), function(i) {
+  message("Now starting job ", i, " for ", brms_jobs$data[i]," data ",brms_jobs$dv[i]," predictions of ", brms_jobs$model[i], " model...")
+  filename <- paste0("cache/cache_",brms_jobs$model[i],"_",brms_jobs$region[i],"_",brms_jobs$dv[i],"_",brms_jobs$data[i],".rds")
+  c(
+    as.list(brms_jobs[i,]),
+    list(
+      fit = if(file.exists(filename)) readRDS(filename) else eval(substitute(brm(
+        formula = which_dv ~ 1 + condition + (1 + condition | itemid) + (1 + condition | subject),
+        data = fs %>% filter(model == which_model & !is.na(region) & condition %in% c("1a","1b","1c","1d") & region == which_region),
+        prior = m_priors$which_dv,
+        family = which_family,
+        save_pars = save_pars(all = TRUE),
+        chains = 4,
+        cores = 4,
+        iter = 4000,
+        warmup = 2000,
+        refresh = 100,
+        file = which_file
+      ), list(
+        which_dv = as.name(brms_jobs$dv[i]),
+        which_model = brms_jobs$model[i],
+        which_file = filename,
+        which_region = brms_jobs$region[i],
+        which_family = if(brms_jobs$dv[i] == "RPD_zi") quote(hurdle_lognormal()) else if(brms_jobs$dv[i] == "RPD") quote(lognormal()) else if(brms_jobs$dv[i] == "FPR") quote(bernoulli("logit"))
+      )))
+    )
+  )
+})
+
+```
+
+
+```{r expeffects, warning=FALSE}
+
+lapply(brms_fits, function(fit) {
+  #fixef(fit$fit) %>% as.data.frame() %>% rownames_to_column("name") %>% mutate(data = fit$data, dv = fit$dv, model = fit$model, region = fit$region)
+  m_posterior_samples <- as_draws_matrix(fit$fit, variable = "^b_", regex = TRUE) %>% as_tibble()
+  colnames(m_posterior_samples) %<>% gsub("^b_(condition)?","",.)
+  m_posterior_samples %>% as_tibble() %>% pivot_longer(cols = everything()) %>% mutate(data = fit$data, dv = fit$dv, model = fit$model, region = fit$region)
+  backtransform_betas(m_posterior_samples, cs %>% add_intercept(), exp) %>% as_tibble() %>% mutate(data = fit$data, dv = fit$dv, model = fit$model, region = fit$region) %>% pivot_longer(c(-model,-dv,-data,-region)) %>% group_by(across(everything() & !value)) %>% summarize(Q = NA_real_, lb = quantile(value, .025), ub = quantile(value, .975), .groups = "drop")
+    #
+}) %>%
+  bind_rows() %>%
+  mutate(name = gsub("region|condition","",name)) %>%
+  filter(name != "Intercept" & dv == "RPD") %>%
+  rowwise() %>%
+  mutate(label = sprintf("[%.0f, %.0f]%s", lb, ub, ifelse(between(0, lb, ub)," ","*"))) %>%
+  select(-Q, -lb, -ub) %>%
+  pivot_wider(id_cols = c(data, model, region, dv), names_from = name, values_from = label) %>%
+  print(n = Inf)
+
+
+lapply(brms_fits, function(fit) {
+  #fixef(fit$fit) %>% as.data.frame() %>% rownames_to_column("name") %>% mutate(data = fit$data, dv = fit$dv, model = fit$model, region = fit$region)
+  m_posterior_samples <- as_draws_matrix(fit$fit, variable = "^b_", regex = TRUE) %>% as_tibble()
+  colnames(m_posterior_samples) %<>% gsub("^b_(condition)?","",.)
+  m_posterior_samples %>% as_tibble() %>% pivot_longer(cols = everything()) %>% mutate(data = fit$data, dv = fit$dv, model = fit$model, region = fit$region)
+  backtransform_betas(m_posterior_samples, cs %>% add_intercept(), exp) %>% as_tibble() %>% mutate(data = fit$data, dv = fit$dv, model = fit$model, region = fit$region) %>% pivot_longer(c(-model,-dv,-data,-region)) %>% group_by(across(everything() & !value)) %>% summarize(Q = NA_real_, lb = quantile(value, .025), ub = quantile(value, .975), .groups = "drop")
+    #
+}) %>%
+  bind_rows() %>%
+  mutate(name = gsub("region|condition","",name)) %>%
+  filter(name != "Intercept" & dv == "FPR") %>%
+  rowwise() %>%
+  mutate(label = sprintf("[%.0f, %.0f]%s", lb*100, ub*100, ifelse(between(0, lb, ub)," ","*"))) %>%
+  select(-Q, -lb, -ub) %>%
+  pivot_wider(id_cols = c(data, model, region, dv), names_from = name, values_from = label) %>%
+  print(n = Inf)
+
+brms_samples_narrow <- lapply(seq_along(brms_fits), function(x) {
+  m_posterior_samples <- as_draws_matrix(brms_fits[[x]]$fit, variable = "^b_", regex = TRUE) %>% as_tibble()
+  colnames(m_posterior_samples) %<>% gsub("^b_(condition)?","",.)
+  m_posterior_samples %>% as_tibble() %>% pivot_longer(cols = everything()) %>% bind_cols(brms_jobs[x,])
+  backtransform_betas(m_posterior_samples, cs %>% add_intercept(), exp) %>% as_tibble() %>% bind_cols(brms_jobs[x,]) %>% pivot_longer(c(-model,-dv,-data,-region))
+}) %>%
+  bind_rows() %>%
+  filter(name != "Intercept") %>%
+  mutate_if(is.character, as.factor)
+
+brms_samples_narrow %>%
+  filter(data == "test" & dv %in% c("FPR","RPD") & name %in% c("anim","subj")) %>%
+  ggplot() +
+  theme_apa(tilted_axis = FALSE) +
+  theme(legend.position = "bottom") +
+  facet_grid(dv~region, scales = "free_y") +
+  geom_violin(aes(x=name,y=value,color=model), position = position_dodge(), draw_quantiles=.5, linewidth = .75, width = .8) +
+  geom_hline(yintercept = 0, linetype="dashed") +
+  labs(x = NULL, y = "Linear effect (backtransformed)", color = NULL) +
+  scale_color_manual(breaks = c("experiment", "seam", "swift"), values = c("darkgray", "orange", "purple"), labels = c("Experiment","SEAM","SWIFT"))
+
+test_jobs <- brms_jobs %>%
+  mutate(id = row_number()) %>%
+  filter(data == "test") %>%
+  pivot_wider(names_from = "model", values_from = "id")
+
+ps_contrasts <- lapply(seq_len(nrow(test_jobs)), function(i) {
+
+  ms <- sapply(c("experiment","seam","swift"), function(m) brms_fits[[test_jobs[[m]][i]]]$fit %>% as_draws(variable = "^b_condition", regex = TRUE) %>% lapply(as_tibble) %>% bind_rows(), simplify = FALSE)
+
+  bind_rows(
+    (ms$seam - ms$experiment) %>% pivot_longer(cols = everything(), names_to = "coef", values_to = "value") %>% mutate(model = "seam") ,
+    (ms$swift - ms$experiment) %>% pivot_longer(cols = everything(), names_to = "coef", values_to = "value") %>% mutate(model = "swift")
+  ) %>% bind_cols(test_jobs[i,c("data","region","dv")]) %>% mutate(coef = gsub("^b_condition", "", coef))
+
+}) %>% bind_rows()
+
+ps_contrasts %>% 
+  filter(coef %in% c("anim","subj") & dv %in% c("RPD","FPR")) %>%
+  ggplot() +
+  facet_grid(dv~region, scales = "free_y") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_violin(aes(x=coef,y=value,color=model), position = position_dodge(width = .75), draw_quantiles=.5, linewidth = .75, width = .5) +
+  theme_apa(tilted_axis = FALSE) +
+  theme(legend.position = "bottom") +
+  scale_color_manual(breaks = c("experiment", "seam", "swift"), values = c("darkgray", "orange", "purple"), labels = c("Experiment","SEAM","SWIFT"), name = NULL)
+
+```
+
+## Activation Analysis
+
+```{r act-analysis}
+
+all_ahist <- {
+  fitted_params <- samples_summary %>% group_by(model, param) %>% summarize(value = mean(midHPDI))
+  
+  log_params <- startsWith(fitted_params$param, "log_")
+  fitted_params$param[log_params] <- substr(fitted_params$param[log_params], 5, 100)
+  fitted_params$value[log_params] <- exp(fitted_params$value[log_params])
+
+  nsim <- 500
+  m <- "seam"
+  joined_params <- default_params[[m]] %>% mutate(value = ifelse(param %in% fitted_params$param, fitted_params$value[match(param, fitted_params$param)], value))
+  fixseqs_traj <- vector("list", nsim)
+  ahist_traj <- vector("list", nsim)
+  events_traj <- vector("list", nsim)
+  for(run in seq_len(nsim)) {
+    write.table(joined_params, file.path(sim.dir, sprintf("swpar_RETRO-EN-%1$s_%1$s_traj_%2$d.par", m, run)), col.names = FALSE, row.names = FALSE, quote = FALSE)
+    system2(file.path(toupper(m), "SIM", "swiftstat7p"), c("-qg", "-c", sprintf("RETRO-EN-%s", m), "-s", sprintf("%s_traj_%d", m, run), "-e", data.dir, "-i", sim.dir, "-I7-10", "-o", sim.dir, "-P", "output_ahist=1,output_events=1,runs=1", "-r", 1234+run))
+    fixseqs_traj[[run]] <- read.fixseq(file.path(sim.dir, sprintf("fixseqin_%s_traj_%d.dat", m, run))) %>% mutate(r = run)
+    ahist_traj[[run]] <- read.table(file.path(sim.dir, sprintf("ahist_%s_traj_%d.dat", m, run)), sep = "\t", col.names = c("sno","t","act")) %>% mutate(r = run) %>% group_by(sno) %>% arrange(sno, t) %>% split(., .$sno) %>% lapply(function(sact) {
+      sact %>% arrange(t) %>% mutate(act = read.table(text = act, sep = " ") %>% rename_all(function(x) c("G","L","N","S", paste0("W",seq_len(length(x)-4)))))
+    })
+    events_traj[[run]] <- read.table(file.path(sim.dir, sprintf("events_%s_traj_%d.dat", m, run)), sep = "\t", col.names = c("sno","t","event")) %>% mutate(r = run) %>% split(., .$sno)
+  }
+  all_ahist_sim <- NULL
+  all_ahist_agg <- NULL
+  all_sim_events <- NULL
+  
+  for(itemid in 7:10) {
+  
+    itemcond <- items$condition[match(itemid, items$sno)]
+  
+    adverb_word <- if(itemcond %in% c("1c","1d")) 16 else if(itemcond %in% c("1a","1b")) 15
+    verb_word <- if(itemcond %in% c("1c","1d")) 17 else if(itemcond %in% c("1a","1b")) 16
+    target_word <- 6
+    distractor_word <- if(itemcond %in% c("1c","1d")) 13 else if(itemcond %in% c("1a","1b")) 14
+  
+    all_fixseqs_traj <- bind_rows(fixseqs_traj) %>% filter(sno == itemid) %>% group_by(r, sno) %>% mutate(x = corpus$x0[match(paste(sno, fw), paste(corpus$sno, corpus$iw))] + fl, t1 = cumsum(lag(tfix+tsac,1,0)), t2 = t1+tfix)
+  
+    all_ahist <- lapply(ahist_traj, function(x) x[[as.character(itemid)]]) %>%
+      bind_rows() %>%
+      group_by(r) %>%
+      arrange(r, t) %>%
+      mutate(tend = lead(t), timer = act[,c("G","L","N","S")], adverb = act[[paste0("W",adverb_word)]], verb = act[[paste0("W",verb_word)]], target = act[[paste0("W",target_word)]], distractor = act[[paste0("W",distractor_word)]], postcrit = act[[paste0("W",verb_word+1)]]) %>%
+      select(-act)
+  
+    all_nlab_events <- lapply(events_traj, function(x) x[[as.character(itemid)]] %>% filter(event == "nlab") %>% select(-event)) %>% bind_rows()
+    all_encoding_events <- lapply(events_traj, function(x) x[[as.character(itemid)]] %>% filter(event == sprintf("encode %d", verb_word)) %>% select(-event)) %>% bind_rows()
+  
+  
+    t1s <- tibble(r = seq_len(nsim)) %>%
+      mutate(
+        t_verb_encoded = all_encoding_events$t[match(r, all_encoding_events$r)],
+        t_verb_first_fixated = all_fixseqs_traj$t1[match(paste(r, verb_word), paste(all_fixseqs_traj$r, all_fixseqs_traj$fw))]
+      ) %>% rowwise() %>%
+      mutate(
+        t_first_nlab_after_first_fix = all_nlab_events$t[all_nlab_events$r == r][which(all_nlab_events$t[all_nlab_events$r == r] >= t_verb_first_fixated)[1]]
+      ) %>% ungroup()
+  
+    all_ahist <- all_ahist %>%
+      mutate(tc = t - t1s$t_verb_encoded[match(r, t1s$r)], tcend = tend - t1s$t_verb_encoded[match(r, t1s$r)]) %>%
+      ungroup() %>%
+      rowwise(sno, r, adverb, verb, target, distractor, postcrit) %>%
+      filter(!is.na(tcend)) %>%
+      summarize(tc = seq(floor(tc), floor(tcend))) %>%
+      ungroup() %>%
+      group_by(sno, r, tc) %>%
+      summarize_all(last) %>%
+      pivot_longer(cols = c("target","distractor","adverb","verb","postcrit"), names_to = "region", values_to = "act")%>%
+      mutate(region = factor(region, levels = c("target","distractor","adverb","verb","postcrit")))
+  
+  
+    all_ahist_sim <- bind_rows(all_ahist_sim, all_ahist)
+  
+    all_ahist_agg <- bind_rows(all_ahist_agg, all_ahist %>% group_by(condition = itemcond, tc, region) %>% summarize(act = mean(act)))
+  }
+  
+  list(sim = all_ahist_sim, agg = all_ahist_agg, events = all_sim_events)
+} %>% cache("all_ahist")
+
+ggplot() +
+  theme_apa() +
+  facet_grid(~region) +
+  scale_x_reverse() +
+  ylim(0, 40) +
+  coord_flip() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_line(aes(x = tc, y = act, color = condition, group = condition), data = all_ahist$agg %>% filter(between(tc, -1500, 2000))) +
+  labs(y = "Mean word activation", x = "Time", color = NULL) +
+  scale_color_discrete(breaks = c("1a","1b","1c","1d"), labels = c("-anim\n-subj","+anim\n-subj","-anim\n+subj","+anim\n+subj")) +
+  theme(legend.position = "bottom")
+
+
+```
