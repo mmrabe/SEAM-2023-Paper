@@ -1,0 +1,7 @@
+moment	7	10	16
+cat	NP	NP	NP
+mom-cat	IP	I-bar	IP
+role	spec	spec	spec
+number	NULL	NULL	NULL
+NOM	yes	yes	yes
+sem	yes	yes	yes
