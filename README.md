@@ -1,4 +1,12 @@
-# SEAM (Rabe et al., 2023) Supplementary Materials
+## SEAN (Rabe et al., 2023) Supplementary Material
+
+### General
+
+This repository contains the analysis code as used in the Rabe et al. (2023) SEAM manuscript.
+
+The RMarkdown script SEAM.Rmd can be run with cached intermediate results without having to compile the SEAM and SWIFT models. However, for a full replication, you should empty the cache directory and compile the models yourself so that you can perform the necessary simulations.
+
+### Compiling SWIFT and SEAM
 
 This repository contains the computational models SEAM and SWIFT as used in the Rabe et al. (2023) SEAM manuscript.
 
@@ -15,4 +23,8 @@ On UNIX systems (such as Linux or MacOS), compilers are usually pre-installed bu
 
 Upon compiling, a `*/SIM/` subdirectory will be created for the respective model, which contains all binary executables. The libraries for use with the scripting languages R and Python are moreover copied into the `*/MCMC/` subdirectories. There, you will also find example scripts in R and Python, and a shell script calling the command-line interface. In the examples, the corpus and an example fixation sequence are loaded, parameters are manually updated, and the likelihood is evaluated.
 
-Each model comes with an example corpus and dataset in `*/DATA/`. The corpus represents the items used in the experimental Mertzen et al. (2023) data set. The test data set is a simulated fixation sequence. For the experimental and simulated data discussed in the SEAM manuscript, as well as the code for the reported analyses, please refer to the OSF repository at https://doi.org/10.17605/OSF.IO/R39CX.
+Each model comes with an example corpus and dataset in `*/DATA/`. The corpus represents the items used in the experimental Mertzen et al. (2023) data set. The test data set is a simulated fixation sequence.
+
+### Running the MCMC simulations
+
+The script swift_recovery.R performs the recovery study (fit SEAM to 100 simulated datasets with known parameters. The script swift_fit,R performs the parameter estimation for experimental data.
