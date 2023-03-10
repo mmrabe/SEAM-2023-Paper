@@ -1,4 +1,4 @@
-## SEAN (Rabe et al., 2023) Supplementary Material
+## SEAM (Rabe et al., 2023) Supplementary Material
 
 ### General
 
@@ -27,4 +27,4 @@ Each model comes with an example corpus and dataset in `*/DATA/`. The corpus rep
 
 ### Running the MCMC simulations
 
-The script swift_recovery.R performs the recovery study (fit SEAM to 100 simulated datasets with known parameters. The script swift_fit,R performs the parameter estimation for experimental data.
+The script swift_recovery.R performs the recovery study (fit SEAM to 100 simulated datasets with known parameters. The script swift_fit.R performs the parameter estimation for experimental data.
